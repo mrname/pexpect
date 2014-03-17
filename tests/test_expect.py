@@ -33,7 +33,7 @@ import signal
 # This may not be true, but seems adequate for testing now.
 # I should fix this at some point.
 
-# query: For some reason an extra newline occures under OS X evey
+# query: For some reason an extra newline occures under OS X every
 # once in a while. Excessive uses of .replace resolve these
 
 FILTER=''.join([(len(repr(chr(x)))==3) and chr(x) or '.' for x in range(256)])
@@ -50,7 +50,7 @@ def hex_diff(left, right):
         diff = ['< %s\n> %s' % (_left, _right,) for _left, _right in zip(
             hex_dump(left).splitlines(), hex_dump(right).splitlines())
             if _left != _right]
-        return '\n' + '\n'.join(diff,)
+        return u''.join('\n', '\n'.join(diff[:30],))
 
 
 class assert_raises_msg(object):
