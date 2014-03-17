@@ -831,7 +831,6 @@ class spawn(object):
             p.expect(['wxyz'])
         '''
 
-        self.child_fd
         attr = termios.tcgetattr(self.child_fd)
         if state:
             attr[3] = attr[3] | termios.ECHO
