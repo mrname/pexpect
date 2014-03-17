@@ -1090,11 +1090,19 @@ class spawn(object):
         #        os.write(self.child_fd, '%c' % 4)
         #finally: # restore state
         #    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+        # for platforms without VEOF, assume CTRL-D
+        char = 4
         if hasattr(termios, 'VEOF'):
-            char = ord(termios.tcgetattr(self.child_fd)[6][termios.VEOF])
-        else:
-            # platform does not define VEOF so assume CTRL-D
-            char = 4
+            try:
+                state = termios.tcgetattr(self.child_fd)
+                char = ord(state[6][termios.VEOF])
+            except termios.error as e:
+                char = 4
+                #sys.stderr.write('\ntermios.error: %r' % (e,))
+                #sys.stderr.write('\nself.child_fd: %r' % (self.child_fd,))
+                #sys.stderr.write('\nisatty: %r' % (self.isatty()))
+                #raise
         self.send(self._chr(char))
 
     def sendintr(self):
@@ -1102,11 +1110,18 @@ class spawn(object):
         '''This sends a SIGINT to the child. It does not require
         the SIGINT to be the first character on a line. '''
 
+        # for platforms without VINTR assume CTRL-C
+        char = 3
         if hasattr(termios, 'VINTR'):
-            char = ord(termios.tcgetattr(self.child_fd)[6][termios.VINTR])
-        else:
-            # platform does not define VINTR so assume CTRL-C
-            char = 3
+            try:
+                state = termios.tcgetattr(self.child_fd)
+                char = ord(state[6][termios.VINTR])
+            except termios.error as e:
+                char = 3
+                #sys.stderr.write('\ntermios.error: %r' % (e,))
+                #sys.stderr.write('\nself.child_fd: %r' % (self.child_fd,))
+                #sys.stderr.write('\nisatty: %r' % (self.isatty()))
+                #raise
         self.send(self._chr(char))
 
     def eof(self):
