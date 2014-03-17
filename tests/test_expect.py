@@ -50,7 +50,7 @@ def hex_diff(left, right):
         diff = ['< %s\n> %s' % (_left, _right,) for _left, _right in zip(
             hex_dump(left).splitlines(), hex_dump(right).splitlines())
             if _left != _right]
-        return u''.join('\n', '\n'.join(diff[:30],))
+        return ''.join('\n', '\n'.join(diff[:30],))
 
 
 class assert_raises_msg(object):
