@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import pexpect
-import pyunit
 
 def main ():
 	pid, fd = fooork ('aThelaDSjd','-i')
