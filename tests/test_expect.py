@@ -305,8 +305,9 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
 
     def test_expect (self):
         the_old_way = subprocess.Popen(args=['ls', '-l', '/bin'],
-                stdout=subprocess.PIPE).communicate()[0].rstrip()
-        p = pexpect.spawn('ls -l /bin')
+                stdout=subprocess.PIPE, env={'TERM': 'dumb'}
+                ).communicate()[0].rstrip()
+        p = pexpect.spawn('ls -l /bin', env={'TERM': 'dumb'})
         the_new_way = b''
         while 1:
             i = p.expect ([b'\n', pexpect.EOF])
@@ -322,8 +323,9 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
 
     def test_expect_exact (self):
         the_old_way = subprocess.Popen(args=['ls', '-l', '/bin'],
-                stdout=subprocess.PIPE).communicate()[0].rstrip()
-        p = pexpect.spawn('ls -l /bin')
+                stdout=subprocess.PIPE, env={'TERM': 'dumb'}
+                ).communicate()[0].rstrip()
+        p = pexpect.spawn('ls -l /bin', env={'TERM': 'dumb'})
         the_new_way = b''
         while 1:
             i = p.expect_exact ([b'\n', pexpect.EOF])
@@ -342,8 +344,9 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
 
     def test_expect_eof (self):
         the_old_way = subprocess.Popen(args=['/bin/ls', '-l', '/bin'],
-                stdout=subprocess.PIPE).communicate()[0].rstrip()
-        p = pexpect.spawn('/bin/ls -l /bin')
+                stdout=subprocess.PIPE, env={'TERM': 'dumb'}
+                ).communicate()[0].rstrip()
+        p = pexpect.spawn('ls -l /bin', env={'TERM': 'dumb'})
         p.expect(pexpect.EOF) # This basically tells it to read everything. Same as pexpect.run() function.
         the_new_way = p.before
         the_new_way = the_new_way.replace(b'\r\n', b'\n'

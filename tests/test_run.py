@@ -50,8 +50,10 @@ class RunFuncTestCase(PexpectTestCase.PexpectTestCase):
 
     def test_run (self):
         the_old_way = subprocess.Popen(args=['ls', '-l', '/bin'],
-                stdout=subprocess.PIPE).communicate()[0].rstrip()
-        (the_new_way, exitstatus) = self.runfunc('ls -l /bin', withexitstatus=1)
+                stdout=subprocess.PIPE, env={'TERM': 'dumb'}
+                ).communicate()[0].rstrip()
+        (the_new_way, exitstatus) = self.runfunc('ls -l /bin',
+                withexitstatus=1, env={'TERM': 'dumb'})
         the_new_way = the_new_way.replace(self.cr, self.empty).rstrip()
         self.assertEqual(self.prep_subprocess_out(the_old_way), the_new_way)
         self.assertEqual(exitstatus, 0)
