@@ -39,12 +39,15 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
         process.'''
         child = pexpect.spawn('python getch.py')
         child.expect('READY', timeout=5)
+        i = None
         try:
-            for i in range(1,256):
+            for i in range(1, 256):
                 child.send(byte(i))
-                child.expect ('%d\r\n' % (i,))
             # This needs to be last, as getch.py exits on \x00
             child.send(byte(0))
+
+            for i in range(1, 256):
+                child.expect('%d\r\n' % (i,))
             child.expect('0\r\n')
             child.expect(pexpect.EOF)
         except Exception:

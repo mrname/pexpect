@@ -92,7 +92,14 @@ __revision__ = ''
 __all__ = ['ExceptionPexpect', 'EOF', 'TIMEOUT', 'spawn', 'spawnu', 'run', 'runu',
            'which', 'split_command_line', '__version__', '__revision__']
 
+import inspect
+from pprint import pprint
+
 PY3 = (sys.version_info[0] >= 3)
+
+if not PY3:
+    InterruptedError = select.error
+
 
 # Exception classes used by this module.
 class ExceptionPexpect(Exception):
@@ -457,7 +464,7 @@ class spawn(object):
         self.delaybeforesend = 0.05
         # Used by close() to give kernel time to update process status.
         # Time in seconds.
-        self.delayafterclose = 0.1
+        self.delayafterclose = 0.01
         # Used by terminate() to give kernel time to update process status.
         # Time in seconds.
         self.delayafterterminate = 0.1
@@ -508,13 +515,15 @@ class spawn(object):
         then this does not close it. '''
 
         if not self.closed:
-            # It is possible for __del__ methods to execute during the
-            # teardown of the Python VM itself. Thus self.close() may
-            # trigger an exception because os.close may be None.
             try:
-                self.close()
-            # which exception, shouldnt' we catch explicitly .. ?
-            except:
+                self.close(force=True)
+            except ExceptionPexpect:
+                # child process was not able to exit
+                pass
+            except Exception:
+                # It is possible for __del__ methods to execute during the
+                # teardown of the Python VM itself. Thus self.close() may
+                # trigger an exception because os.close may be None.
                 pass
 
     def __str__(self):
@@ -548,6 +557,8 @@ class spawn(object):
         s.append('delaybeforesend: ' + str(self.delaybeforesend))
         s.append('delayafterclose: ' + str(self.delayafterclose))
         s.append('delayafterterminate: ' + str(self.delayafterterminate))
+        s.append('select: ' + repr(self.__select([self.child_fd], [], [], 0)))
+        s.append('isalive: ' + str(self.isalive()))
         return '\n'.join(s)
 
     def _spawn(self, command, args=[]):
@@ -736,18 +747,19 @@ class spawn(object):
         behavior with files. Set force to True if you want to make sure that
         the child is terminated (SIGKILL is sent if the child ignores SIGHUP
         and SIGINT). '''
-
         if not self.closed:
             self.flush()
             os.close(self.child_fd)
             # Give kernel time to update process status.
-            time.sleep(self.delayafterclose)
+            #pprint('--start')
+            #pprint(inspect.stack())
+            #pprint('--end')
+            select_sleep(self.delayafterclose)
             if self.isalive():
                 if not self.terminate(force):
                     raise ExceptionPexpect('Could not terminate the child.')
             self.child_fd = -1
             self.closed = True
-            #self.pid = None
 
     def flush(self):
         '''This does nothing. It is here to support the interface for a
@@ -789,7 +801,7 @@ class spawn(object):
                 return False
             if timeout is not None:
                 timeout = end_time - time.time()
-            time.sleep(0.1)
+            select_sleep(0.1)
 
     def getecho(self):
         '''This returns the terminal echo mode. This returns True if echo is
@@ -890,6 +902,7 @@ class spawn(object):
         # from the child_fd -- it will block forever or until TIMEOUT.
         # For this case, I test isalive() before doing any reading.
         # If isalive() is false, then I pretend that this is the same as EOF.
+        r = []
         if not self.isalive():
             # timeout of 0 means "poll"
             r, w, e = self.__select([self.child_fd], [], [], 0)
@@ -906,25 +919,19 @@ class spawn(object):
                 raise EOF('End Of File (EOF). Slow platform.')
 
         stime = time.time()
-        death = False
-        while True:
+        eof_flag = False
+        while not r:
             r, w, e = self.__select([self.child_fd], [], [], poll_exit)
-            elapsed = time.time() - stime
-            if r:
-                break
-            elif not death and not self.isalive():
-                # Under Irix and OSX, even after all output from child_fd has
-                # been received, the parent process has not yet received a
-                # (pid, status) from waitpid(2) until at least one additional
-                # call to select(2) is issued. Therefor, we poll every
-                # `poll_exit` interval for waitpid() which may cause EOF.
-                death = True
-                # poll at least just one more time for output
-                poll_exit = 0
-            elif death:
-                self.flag_eof = True
+            if not r and eof_flag:
                 raise EOF('End of File (EOF). Very slow platform.')
-            elif timeout is not None:
+            # reproduced on travis-ci for python 3.2; select() returns
+            # nothing for reading, then isalive() returns False, more
+            # data remains for reading, so check one more time!
+            elif not r and not self.isalive():
+                poll_exit = 0
+                eof_flag = True
+            elif not r and timeout is not None:
+                elapsed = time.time() - stime
                 if elapsed > timeout:
                     raise TIMEOUT('Timeout exceeded.')
                 else:
@@ -1041,7 +1048,7 @@ class spawn(object):
         bytes written. If a logfile is specified, a copy is written to that
         log. '''
 
-        time.sleep(self.delaybeforesend)
+        select_sleep(self.delaybeforesend)
 
         s = self._coerce_send_string(s)
         self._log(s, 'send')
@@ -1150,20 +1157,20 @@ class spawn(object):
             return True
         try:
             self.kill(signal.SIGHUP)
-            time.sleep(self.delayafterterminate)
+            select_sleep(self.delayafterterminate)
             if not self.isalive():
                 return True
             self.kill(signal.SIGCONT)
-            time.sleep(self.delayafterterminate)
+            select_sleep(self.delayafterterminate)
             if not self.isalive():
                 return True
             self.kill(signal.SIGINT)
-            time.sleep(self.delayafterterminate)
+            select_sleep(self.delayafterterminate)
             if not self.isalive():
                 return True
             if force:
                 self.kill(signal.SIGKILL)
-                time.sleep(self.delayafterterminate)
+                select_sleep(self.delayafterterminate)
                 if not self.isalive():
                     return True
                 else:
@@ -1174,7 +1181,7 @@ class spawn(object):
             # this to happen. I think isalive() reports True, but the
             # process is dead to the kernel.
             # Make one last attempt to see if the kernel is up to date.
-            time.sleep(self.delayafterterminate)
+            select_sleep(self.delayafterterminate)
             if not self.isalive():
                 return True
             else:
@@ -1521,10 +1528,10 @@ class spawn(object):
                 if (timeout is not None) and (timeout < 0):
                     raise TIMEOUT('Timeout exceeded in expect_any().')
                 # Still have time left, so read more data
-                c = self.read_nonblocking(self.maxread, timeout)
-                freshlen = len(c)
-                time.sleep(0.0001)
-                incoming = incoming + c
+                inp_data = self.read_nonblocking(self.maxread, timeout)
+                freshlen = len(inp_data)
+                #select_sleep(0.0001)
+                incoming += inp_data
                 if timeout is not None:
                     timeout = end_time - time.time()
         except EOF:
@@ -2062,5 +2069,35 @@ def split_command_line(command_line):
     if arg != '':
         arg_list.append(arg)
     return arg_list
+
+
+def select_sleep(timeout=None):
+    """select_sleep([timeout]) -> None
+
+    timeout is specified in seconds; it may be a floating point number to
+    specify fractions of seconds.  If it is absent or None, the call will
+    never time out.
+    """
+    # it is necessary on some systems to avoid using time.sleep and its
+    # accompanying SIGARLM, it has a detrimental delay of signal propagation
+    # of at least SIGCHLD. There is a very simple solution; select() has great
+    # time resolution and avoids using signals all together.
+    import time
+    time.sleep(timeout)
+    #stime = time.time()
+    #while True:
+    #    try:
+    #        select.select([], [], [], timeout)
+    #    # So what happens when a signal arrives and is handled (perhaps, by a
+    #    # user-installed signal handler?), yet we requested to sleep for say,
+    #    # 10 seconds, and 9 more seconds remain? Do the math resume for the
+    #    # time remaining.
+    #    except InterruptedError:
+    #        if timeout is None:
+    #            timeout -= time.time() - stime
+    #            if timeout <= 0:
+    #                break
+    #    else:
+    #        break
 
 # vi:set sr et ts=4 sw=4 ft=python :
