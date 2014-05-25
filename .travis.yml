@@ -5,13 +5,12 @@ python:
   - 2.7
   - 3.2
   - 3.3
+  - 3.4
   - pypy
-
-virtualenv:
-  system_site_packages: true
 
 before_install:
   - sudo apt-get install python-yaml python3-yaml
+
 install:
   - export PYTHONIOENCODING=UTF8
   - python setup.py install
@@ -19,6 +18,7 @@ install:
 
 before_script:
   - source test.env
+
 script:
   - coverage run tools/testall.py
 

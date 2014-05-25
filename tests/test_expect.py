@@ -460,6 +460,7 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         self.assertEqual(expect([b'1, 2, 3', b'2,']), 1)
 
     def test_greed(self):
+        # fails on travis on occasion .. ?
         p = pexpect.spawn(self.PYTHONBIN + ' list100.py')
         self._greed(p.expect)
 
