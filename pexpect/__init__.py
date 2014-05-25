@@ -906,6 +906,7 @@ class spawn(object):
                 raise EOF('End Of File (EOF). Slow platform.')
 
         stime = time.time()
+        death = False
         while True:
             r, w, e = self.__select([self.child_fd], [], [], poll_exit)
             elapsed = time.time() - stime
@@ -917,6 +918,10 @@ class spawn(object):
                 # (pid, status) from waitpid(2) until at least one additional
                 # call to select(2) is issued. Therefor, we poll every
                 # `poll_exit` interval for waitpid() which may cause EOF.
+                death = True
+                # poll at least just one more time for output
+                poll_exit = 0
+            elif death:
                 self.flag_eof = True
                 raise EOF('End of File (EOF). Very slow platform.')
             elif timeout is not None:
