@@ -629,7 +629,7 @@ class spawn(object):
         if self.pid == 0:
             # Child.
             # re-set child_fd, which is actually master_fd in the case of
-            # of the child process's point of view, which us used by setwinsize()
+            # of the child process's point of view, which is used by setwinsize()
             # prior to execve().
             self.child_fd = pty.STDIN_FILENO
             self.setwinsize(24, 80)
