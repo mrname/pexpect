@@ -473,13 +473,13 @@ class spawn(object):
         # This flags if we are running on irix
         self.__irix_hack = os_name.startswith('irix')
         # Solaris, HP-UX, AIX, use svr4_pty_fork()
-        self.use_native_pty_fork = not (
-                os_name.startswith('solaris') or
-                os_name.startswith('sunos') or
-                os_name.startswith('aix') or
-                os_name.startswith('hpux')
-                # TODO: I think this will also fix cygwin ?
-                )
+        self.use_native_pty_fork = False #and not (
+#                os_name.startswith('solaris') or
+#                os_name.startswith('sunos') or
+#                os_name.startswith('aix') or
+#                os_name.startswith('hpux')
+#                # TODO: I think this will also fix cygwin ?
+#                )
         try:
             # inherit EOF (^D) and INTR (^C) from controlling process.
             from termios import VEOF, VINTR
