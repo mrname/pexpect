@@ -420,6 +420,8 @@ class spawn(object):
         self.STDIN_FILENO = pty.STDIN_FILENO
         self.STDOUT_FILENO = pty.STDOUT_FILENO
         self.STDERR_FILENO = pty.STDERR_FILENO
+        self.PTYMASTER_DEV_UNIX98 = '/dev/ptmx'
+        self.PTYMASTER_DEV_IBMAIX = '/dev/ptc'
         self.stdin = sys.stdin
         self.stdout = sys.stdout
         self.stderr = sys.stderr
@@ -467,14 +469,33 @@ class spawn(object):
         self.cwd = cwd
         self.env = env
         self.ignore_sighup = ignore_sighup
+        os_name = sys.platform.lower()
         # This flags if we are running on irix
-        self.__irix_hack = (sys.platform.lower().find('irix') >= 0)
-        # Solaris uses internal __fork_pty(). All others use pty.fork().
-        if ((sys.platform.lower().find('solaris') >= 0)
-            or (sys.platform.lower().find('sunos5') >= 0)):
-            self.use_native_pty_fork = False
-        else:
-            self.use_native_pty_fork = True
+        self.__irix_hack = os_name.startswith('irix')
+        # Solaris, HP-UX, AIX, use svr4_pty_fork()
+        self.use_native_pty_fork = not (
+                os_name.startswith('solaris') or
+                os_name.startswith('sunos') or
+                os_name.startswith('aix') or
+                os_name.startswith('hpux')
+                # TODO: I think this will also fix cygwin ?
+                )
+        try:
+            # inherit EOF (^D) and INTR (^C) from controlling process.
+            from termios import VEOF, VINTR
+            fd = sys.__stdin__.fileno()
+            self._EOF = ord(termios.tcgetattr(fd)[6][VEOF])
+            self._INTR = ord(termios.tcgetattr(fd)[6][VINTR])
+        except:
+            # unless the controlling process is also not a terminal,
+            # such as cron(1). Fallback to using CEOF and CINTR.
+            try:
+                from termios import CEOF, CINTR
+                self._EOF = termios.CEOF
+                self._INTR = termios.CINTR
+            except ImportError:
+                self._EOF = 4   # ^D
+                self._INTR = 3  # ^C
 
         # Support subclasses that do not use command or args.
         if command is None:
@@ -603,29 +624,15 @@ class spawn(object):
                 err = sys.exc_info()[1]
                 raise ExceptionPexpect('pty.fork() failed: ' + str(err))
         else:
-            # Use internal __fork_pty
-            self.pid, self.child_fd = self.__fork_pty()
+            self.pid, self.child_fd = self._svr4_pty_fork()
 
         if self.pid == 0:
-            # Child
-            try:
-                # used by setwinsize()
-                self.child_fd = sys.stdout.fileno()
-                self.setwinsize(24, 80)
-            # which exception, shouldnt' we catch explicitly .. ?
-            except:
-                # Some platforms do not like setwinsize (Cygwin).
-                # This will cause problem when running applications that
-                # are very picky about window size.
-                # This is a serious limitation, but not a show stopper.
-                pass
-            # Do not allow child to inherit open file descriptors from parent.
-            max_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
-            for i in range(3, max_fd):
-                try:
-                    os.close(i)
-                except OSError:
-                    pass
+            # Child.
+            # re-set child_fd, which is actually master_fd in the case of
+            # of the child process's point of view, which us used by setwinsize()
+            # prior to execve().
+            self.child_fd = pty.STDIN_FILENO
+            self.setwinsize(24, 80)
 
             if self.ignore_sighup:
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -641,88 +648,243 @@ class spawn(object):
         self.terminated = False
         self.closed = False
 
-    def __fork_pty(self):
-        '''This implements a substitute for the forkpty system call. This
-        should be more portable than the pty.fork() function. Specifically,
-        this should work on Solaris.
+    def _svr4_openpty(self):
 
-        Modified 10.06.05 by Geoff Marshall: Implemented __fork_pty() method to
-        resolve the issue with Python's pty.fork() not supporting Solaris,
-        particularly ssh. Based on patch to posixmodule.c authored by Noah
-        Spurrier::
+        '''svr4_openpty() -> (master_fd, slave_fd)
 
-            http://mail.python.org/pipermail/python-dev/2003-May/035281.html
+        Open a pseudo-terminal, returning open fd's for both master and slave.
 
+        This is an alternative to built-in os.openpty(), which does not work
+        correctly on systems following UNIX System V Release 4. For example,
+        Solaris 8+, Linux, OSF/1, HP-UX, AIX
+
+        These systems do not open each of ``/dev/pty[p-zP-T][0-9a-f]``,
+        seeking the first that allows open in r/w mode but, instead, open
+        a controlling driver, either ``/dev/ptmx`` (MacOS, Linux, Solaris)
+        or ``/dev/ptc`` (IBM AIX), whose returning fd is inspected by
+        ttyname to discover the pty device.
         '''
+        import ctypes.util
 
-        parent_fd, child_fd = os.openpty()
-        if parent_fd < 0 or child_fd < 0:
-            raise ExceptionPexpect("Could not open with os.openpty().")
+        libc_name = ctypes.util.find_library('c')
+
+        if not libc_name:
+            raise ImportError("Can't find C library.")
+
+        libc = ctypes.cdll.LoadLibrary(libc_name)
+
+        # GRANTPT(3C) - grant access to the slave pseudo-terminal device
+        # int grantpt(int fildes);
+        libc.grantpt.argtypes = (ctypes.c_int,)
+        libc.grantpt.restype = ctypes.c_int
+
+        # UNLOCKPT(3C) - unlock a pseudo-terminal master/slave pair
+        # int unlockpt(int fildes);
+        libc.unlockpt.argtypes = (ctypes.c_int,)
+        libc.unlockpt.restype = ctypes.c_int
+
+        # PTSNAME(3C) - get name of the slave pseudo-terminal device
+        # char *ptsname(int fildes);
+        libc.ptsname.argtypes = (ctypes.c_int,)
+        libc.ptsname.restype = ctypes.c_char_p
+
+        for dev in (self.PTYMASTER_DEV_UNIX98,
+                    self.PTYMASTER_DEV_IBMAIX):
+            if os.path.exists(dev):
+                ptyc_device = dev
+                break
+
+        else:
+            raise OSError, ('requires a controlling driver device: %s, %s.' % (
+                self.PTYMASTER_DEV_UNIX98,
+                self.PTYMASTER_DEV_IBMAIX,))
+
+        master_fd = os.open(ptyc_device, os.O_RDWR | os.O_NOCTTY)
+
+        try:
+            # on failure, close master_fd before raising an exception.
+            msg = 'failed to grant slave pty device: %s'
+            assert 0 == libc.grantpt(master_fd), (msg % (ptyc_device,))
+
+            msg = 'failed to unlock slave pty device: %s'
+            assert 0 == libc.unlockpt(master_fd), (msg % (ptyc_device,))
+
+            msg = 'failed to retrieve slave device name: %s'
+            slave_name = libc.ptsname(master_fd)
+            assert slave_name, (msg % (ptyc_device,))
+
+            slave_fd = os.open(slave_name, os.O_RDWR | os.O_NOCTTY)
+
+        except Exception:
+            os.close(master_fd)
+            raise
+
+        # use ioctl to send a STREAMS message block
+        # ptem - STREAMS Pseudo Terminal Emulation module
+        # ldterm - standard STREAMS terminal line discipline module
+        try:
+            from fcntl import I_PUSH
+            try:
+                fcntl.ioctl(slave_fd, I_PUSH, 'ptem')
+                fcntl.ioctl(slave_fd, I_PUSH, 'ldterm')
+            except IOError:
+                pass
+        except ImportError:
+            pass
+
+        return master_fd, slave_fd
+
+    def _svr4_pty_fork(self):
+
+        '''svr4_pty_fork() -> (pid, master_fd)
+
+        Fork and make the child a session leader with a controlling terminal.
+
+        This is an alternative to built-in ``pty.fork()``, which does not
+        work correctly on HP-UX, SunOS, or AIX. systems following AT&T
+        System V SVR4 conventions (streams).  It achieves this by using
+        ``svr4_openpty()``.
+        '''
+        # __fork_pty implementation was created 10.06.05 by Geoff Marshall,
+        # resolve the issue with Python's pty.fork() not supporting Solaris
+        # (particularly ssh).  It notes that it is based on patch to
+        # posixmodule.c by Noah Spurrier (a previous maintainer), which was
+        # rejected on grounds of failing buildbot on an HP-UX machine which
+        # was not made accessible to him: http://bugs.python.org/issue732401
+        try:
+            master_fd, child_fd = self._svr4_openpty()
+        except (ImportError, OSError):
+            # Fallback to pty.openpty() on ImportError: libc cannot be loaded
+            # dynamically. This happens to occur on stock python 2.7.5, 
+            master_fd, child_fd = pty.openpty()
 
         pid = os.fork()
-        if pid < 0:
-            raise ExceptionPexpect("Failed os.fork().")
-        elif pid == 0:
+
+        if pid == pty.CHILD:
             # Child.
-            os.close(parent_fd)
+            os.close(master_fd)
+
+            # make `child_fd' the controlling tty of the child process
             self.__pty_make_controlling_tty(child_fd)
 
+            # duplicate child_fd to stdin, stdout, and stderr
             os.dup2(child_fd, 0)
             os.dup2(child_fd, 1)
             os.dup2(child_fd, 2)
 
             if child_fd > 2:
                 os.close(child_fd)
+
+            # Close any other file descriptors inherited from parent
+            softlimit_max_nofiles, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+            os.closerange(3, softlimit_max_nofiles)
+
         else:
             # Parent.
             os.close(child_fd)
 
-        return pid, parent_fd
+
+        # always return the master_fd, even from the child process.
+        return pid, master_fd
+
+    # Deprecated: Previously this method was known as __fork_pty.
+    # Although private, we continue to alias it for backwards compatibility.
+    __fork_pty = _svr4_pty_fork
 
     def __pty_make_controlling_tty(self, tty_fd):
-        '''This makes the pseudo-terminal the controlling tty. This should be
-        more portable than the pty.fork() function. Specifically, this should
-        work on Solaris. '''
 
-        child_name = os.ttyname(tty_fd)
+        '''This makes the tty_fd of the child process the controlling tty.
+        '''
 
-        # Disconnect from controlling tty. Harmless if not already connected.
+        if sys.platform.lower().startswith('aix'):
+            # Execute special sequence of steps only for IBM-AIX
+            self.__pty_make_controlling_tty_aix(self, tty_fd)
+            return
+
+        tty_name = os.ttyname(tty_fd)
+
+        # Re-open the previous controlling tty (duplicated by fork) with O_NOCTTY.
         try:
             fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-            if fd >= 0:
-                os.close(fd)
-        # which exception, shouldnt' we catch explicitly .. ?
-        except:
-            # Already disconnected. This happens if running inside cron.
+            os.close(fd)
+        except OSError:
+            # Already disconnected. This happens if running inside cron, for
+            # example, where the parent process didn't have a TTY to begin
+            # with !
             pass
 
+        # create session and set process group id.
         os.setsid()
 
-        # Verify we are disconnected from controlling tty
-        # by attempting to open it again.
-        try:
-            fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-            if fd >= 0:
-                os.close(fd)
-                raise ExceptionPexpect('Failed to disconnect from ' +
-                    'controlling tty. It is still possible to open /dev/tty.')
-        # which exception, shouldnt' we catch explicitly .. ?
-        except:
-            # Good! We are disconnected from a controlling tty.
-            pass
-
         # Verify we can open child pty.
-        fd = os.open(child_name, os.O_RDWR)
-        if fd < 0:
-            raise ExceptionPexpect("Could not open child pty, " + child_name)
-        else:
-            os.close(fd)
+        fd = os.open(tty_name, os.O_RDWR)
+        os.close(fd)
 
         # Verify we now have a controlling tty.
         fd = os.open("/dev/tty", os.O_WRONLY)
-        if fd < 0:
-            raise ExceptionPexpect("Could not open controlling tty, /dev/tty")
-        else:
+        os.close(fd)
+
+    def __pty_make_controlling_tty_aix(self, slave_fd):
+
+        '''AIX-specific code for ensuring the slave_fd of the child process
+        becomes the controlling tty.
+        '''
+
+        # make slave_fd controlling terminal by opening /dev/tty,
+        # and first, using ioctl TIOCNOTTY to unregister the inherited
+        # terminal device from this process.
+        fd = None
+        try:
+            fd = open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+            ioctl(fd, termios.TIOCNOTTY, 0);
+        except (OSError, IOError) as err:
+            os.close(slave_fd)
+            if fd is not None:
+                os.close(fd)
+            raise IOError('failed to make child controlling terminal'
+                          ': %s' % (err,))
+
+        # create session and set process group id.
+        os.setsid()
+
+        # Verification -- by opening /dev/tty again, after the inherited
+        # has been unregistered with TIOCNOTTY, and this session has been set
+        # set as the session leader with os.setsid(), confirm that a subsequent
+        # attempt to open the controlling /dev/tty using O_NOCTTY *should fail*.
+        fd = None
+        try:
+            fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+            raise ExceptionPexpect('Failed to disconnect from controlling tty. '
+                    'It is still possible to open /dev/tty '
+                    '(os_name=%s).' % (os_name,))
+
+        except (OSError, IOError):
+            pass
+
+        # It should be possible to get the filepath of the slave pty
+        slave_name = os.ttyname(slave_fd)
+
+        # Next, it is necessary to re-open our slave pty device
+        # to make it our controlling tty by *not* specifying O_NOCTTY
+        try:
+            fd = os.open(slave_name, os.RDWR)
+        except (OSError, IOError) as err:
+            raise ExceptionPexpect(
+                    'Failed to open slave pty %s as controlling tty'
+                    ': %s' % (slave_name, err,))
+        finally:
+            os.close(fd)
+
+        # Final AIX Verification -- by opening /dev/tty one final time
+        # *without* O_NOCTTY, we expect this to succeed, as we do, in fact
+        # now have a new controlling tty
+        try:
+            fd = open("/dev/tty", O_WRONLY);
+        except (OSError, IOError) as err:
+            raise ExceptionPexpect(
+                    'Failed to open controlling tty as /dev/tty'
+                    ': %s' % (err,))
+        finally:
             os.close(fd)
 
     def fileno(self):
@@ -1065,50 +1227,26 @@ class spawn(object):
         return self.send(self._chr(d[char]))
 
     def sendeof(self):
+        '''Send EOF character to child process.
 
-        '''This sends an EOF to the child. This sends a character which causes
-        the pending parent output buffer to be sent to the waiting child
-        program without waiting for end-of-line. If it is the first character
-        of the line, the read() in the user program returns 0, which signifies
-        end-of-file. This means to work as expected a sendeof() has to be
-        called at the beginning of a line. This method does not send a newline.
-        It is the responsibility of the caller to ensure the eof is sent at the
-        beginning of a line. '''
+        This sends ``self._EOF`` to the child, causing any input to immediately
+        be sent to the child process (normally it is line-buffered).
 
-        ### Hmmm... how do I send an EOF?
-        ###C  if ((m = write(pty, *buf, p - *buf)) < 0)
-        ###C      return (errno == EWOULDBLOCK) ? n : -1;
-        #fd = sys.stdin.fileno()
-        #old = termios.tcgetattr(fd) # remember current state
-        #attr = termios.tcgetattr(fd)
-        #attr[3] = attr[3] | termios.ICANON # ICANON must be set to see EOF
-        #try: # use try/finally to ensure state gets restored
-        #    termios.tcsetattr(fd, termios.TCSADRAIN, attr)
-        #    if hasattr(termios, 'CEOF'):
-        #        os.write(self.child_fd, '%c' % termios.CEOF)
-        #    else:
-        #        # Silly platform does not define CEOF so assume CTRL-D
-        #        os.write(self.child_fd, '%c' % 4)
-        #finally: # restore state
-        #    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        if hasattr(termios, 'VEOF'):
-            char = ord(termios.tcgetattr(self.child_fd)[6][termios.VEOF])
-        else:
-            # platform does not define VEOF so assume CTRL-D
-            char = 4
-        self.send(self._chr(char))
+        Most programs, such as cat(1), only see ^D as an end-of-file if it is
+        the first character of the line, so most times you will want to ensure
+        you have already previously transmitted a carriage return before
+        calling sendeof(). For most operating systems, EOF is Ctrl-D.
+        '''
+        self.send(self._chr(self._EOF))
 
     def sendintr(self):
+        '''Send interrupt character to child process.
 
-        '''This sends a SIGINT to the child. It does not require
-        the SIGINT to be the first character on a line. '''
-
-        if hasattr(termios, 'VINTR'):
-            char = ord(termios.tcgetattr(self.child_fd)[6][termios.VINTR])
-        else:
-            # platform does not define VINTR so assume CTRL-C
-            char = 3
-        self.send(self._chr(char))
+        This sends ``self._INTR`` to the child, usually causing a SIGINT to be
+        transmitted by the temrinal driver. For most operating systems, EOF is
+        Ctrl-C.
+        '''
+        self.send(self._chr(self._INTR))
 
     def eof(self):
 
