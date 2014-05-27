@@ -695,7 +695,7 @@ class spawn(object):
                 break
 
         else:
-            raise OSError, ('requires a controlling driver device: %s, %s.' % (
+            raise OSError('requires a controlling driver device: %s, %s.' % (
                 self.PTYMASTER_DEV_UNIX98,
                 self.PTYMASTER_DEV_IBMAIX,))
 
