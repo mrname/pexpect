@@ -654,15 +654,15 @@ class spawn(object):
 
         Open a pseudo-terminal, returning open fd's for both master and slave.
 
-        This is an alternative to built-in os.openpty(), which does not work
-        correctly on systems following UNIX System V Release 4. For example,
-        Solaris 8+, Linux, OSF/1, HP-UX, AIX
+        This is an alternative to the built-in os.openpty() and libc openpty(3),
+        which does not exist, or work at all, on systems implementing UNIX SVR4
+        (streams), such as Solaris 8+, Linux, OSF/1, HP-UX, AIX.
 
-        These systems do not open each of ``/dev/pty[p-zP-T][0-9a-f]``,
-        seeking the first that allows open in r/w mode but, instead, open
-        a controlling driver, either ``/dev/ptmx`` (MacOS, Linux, Solaris)
-        or ``/dev/ptc`` (IBM AIX), whose returning fd is inspected by
-        ttyname to discover the pty device.
+        These systems do not open each of ``/dev/pty[p-zP-T][0-9a-f]``, seeking
+        the first sucessfully opened file descriptor (BSD), but, instead open a
+        controlling driver, either ``/dev/ptmx`` (MacOS, Linux, Solaris) or
+        ``/dev/ptc`` (IBM AIX), whose returning fd is inspected by ttyname(3)
+        to discover the pty(7) device.
         '''
         import ctypes.util
 
@@ -755,7 +755,8 @@ class spawn(object):
             master_fd, child_fd = self._svr4_openpty()
         except (ImportError, OSError):
             # Fallback to pty.openpty() on ImportError: libc cannot be loaded
-            # dynamically. This happens to occur on stock python 2.7.5, 
+            # dynamically. This happens to occur on stock python 2.7.5,
+            # http://bugs.python.org/issue20664
             master_fd, child_fd = pty.openpty()
 
         pid = os.fork()
