@@ -94,6 +94,7 @@ __all__ = ['ExceptionPexpect', 'EOF', 'TIMEOUT', 'spawn', 'spawnu', 'run', 'runu
 
 PY3 = (sys.version_info[0] >= 3)
 
+
 # Exception classes used by this module.
 class ExceptionPexpect(Exception):
     '''Base class for all exceptions raised by this module.
@@ -420,6 +421,8 @@ class spawn(object):
         self.STDIN_FILENO = pty.STDIN_FILENO
         self.STDOUT_FILENO = pty.STDOUT_FILENO
         self.STDERR_FILENO = pty.STDERR_FILENO
+        self.PTYMASTER_DEV_UNIX98 = '/dev/ptmx'
+        self.PTYMASTER_DEV_IBMAIX = '/dev/ptc'
         self.stdin = sys.stdin
         self.stdout = sys.stdout
         self.stderr = sys.stderr
@@ -467,14 +470,18 @@ class spawn(object):
         self.cwd = cwd
         self.env = env
         self.ignore_sighup = ignore_sighup
+        os_name = sys.platform.lower()
         # This flags if we are running on irix
-        self.__irix_hack = (sys.platform.lower().find('irix') >= 0)
-        # Solaris uses internal __fork_pty(). All others use pty.fork().
-        if ((sys.platform.lower().find('solaris') >= 0)
-            or (sys.platform.lower().find('sunos5') >= 0)):
-            self.use_native_pty_fork = False
-        else:
-            self.use_native_pty_fork = True
+        self.__irix_hack = os_name.startswith('irix')
+
+#        self.use_native_pty_fork = True
+
+        # Solaris, HP-UX, AIX, use svr4_pty_fork(), TODO: cygwin ?
+        self.use_native_pty_fork = not (
+                os_name.startswith('solaris') or
+                os_name.startswith('sunos') or
+                os_name.startswith('aix') or
+                os_name.startswith('hpux'))
 
         # Support subclasses that do not use command or args.
         if command is None:
@@ -596,36 +603,45 @@ class spawn(object):
         assert self.pid is None, 'The pid member must be None.'
         assert self.command is not None, 'The command member must not be None.'
 
+        # NOTE: although the 2nd return value of pty.fork() or _svr4_pty_fork()
+        # is named 'child_fd', this is actually the return value of 'master_fd';
+        # that is, the master-end of the parent process with which to
+        # communicate *with* the child process.
+
         if self.use_native_pty_fork:
             try:
-                self.pid, self.child_fd = pty.fork()
+                self.pid, fd= pty.fork()
             except OSError:
                 err = sys.exc_info()[1]
                 raise ExceptionPexpect('pty.fork() failed: ' + str(err))
         else:
-            # Use internal __fork_pty
-            self.pid, self.child_fd = self.__fork_pty()
+            self.pid, self.child_fd = self._svr4_pty_fork()
 
-        if self.pid == 0:
-            # Child
-            try:
-                # used by setwinsize()
-                self.child_fd = sys.stdout.fileno()
-                self.setwinsize(24, 80)
-            # which exception, shouldnt' we catch explicitly .. ?
-            except:
-                # Some platforms do not like setwinsize (Cygwin).
-                # This will cause problem when running applications that
-                # are very picky about window size.
-                # This is a serious limitation, but not a show stopper.
-                pass
+        #if self.pid != pty.CHILD:
+        #    # Parent receives master_fd
+        #
+        #else:
+        if self.pid == pty.CHILD:
+            self.child_fd = pty.STDIN_FILENO
+            self.setwinsize(24, 80)
             # Do not allow child to inherit open file descriptors from parent.
             max_fd = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
-            for i in range(3, max_fd):
-                try:
-                    os.close(i)
-                except OSError:
-                    pass
+            os.closerange(3, max_fd)
+
+            # Child must discover its master_fd, which has been dup'd
+            # as any of stdin, stdout, stderr --
+            #self.child_fd = sys.stdout.fileno()
+            #try:
+            #except Exception as err:
+            #    # Some platforms do not like setwinsize (Cygwin).
+            #    # This will cause problem when running applications that
+            #    # are very picky about window size.
+            #    # This is a serious limitation, but not a show stopper.
+            #    #
+            #    # TODO: I think with _svr4_pty_fork would actually resolve
+            #    # this issue, it is because on these platforms you should
+            #    # use ioctl to set controlling tty, not re-open /dev/tty
+            #    pass
 
             if self.ignore_sighup:
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -641,89 +657,242 @@ class spawn(object):
         self.terminated = False
         self.closed = False
 
-    def __fork_pty(self):
-        '''This implements a substitute for the forkpty system call. This
-        should be more portable than the pty.fork() function. Specifically,
-        this should work on Solaris.
+    def _svr4_openpty(self):
+        """svr4_openpty() -> (master_fd, slave_fd)
 
-        Modified 10.06.05 by Geoff Marshall: Implemented __fork_pty() method to
-        resolve the issue with Python's pty.fork() not supporting Solaris,
-        particularly ssh. Based on patch to posixmodule.c authored by Noah
-        Spurrier::
+        Open a pseudo-terminal, returning open fd's for both master and slave end.
 
-            http://mail.python.org/pipermail/python-dev/2003-May/035281.html
+        This is an alternative to built-in os.openpty(), which does not work
+        correctly on systems following AT&T System V SVR4 conventions.
 
-        '''
+        These systems do not open each of ``/dev/pty[p-zP-T][0-9a-f]``,
+        seeking the first that allows open in r/w mode but, instead, open
+        a controlling driver, either ``/dev/ptmx`` (MacOS, Linux, Solaris)
+        or ``/dev/ptc`` (IBM AIX), whose returning fd is inspected by
+        ttyname to discover the pty device.
+        """
+        import ctypes.util
 
-        parent_fd, child_fd = os.openpty()
-        if parent_fd < 0 or child_fd < 0:
-            raise ExceptionPexpect("Could not open with os.openpty().")
+        libc_name = ctypes.util.find_library('c')
+
+        if not libc_name:
+            raise ImportError("Can't find C library.")
+
+        libc = ctypes.cdll.LoadLibrary(libc_name)
+
+        libc.grantpt.argtypes, libc.grantpt.restype = [ctypes.c_int,], ctypes.c_int
+        libc.unlockpt.argtypes, libc.unlockpt.restype = [ctypes.c_int,], ctypes.c_int
+        libc.ptsname.argtypes, libc.ptsname.restype = [ctypes.c_int,], ctypes.c_char_p
+
+        for dev in (self.PTYMASTER_DEV_UNIX98,
+                    self.PTYMASTER_DEV_IBMAIX):
+            if os.path.exists(dev):
+                ptyc_device = dev
+                break
+        else:
+            raise OSError, (
+                    'requires a controlling driver device: %s, %s.' % (
+                        self.PTYMASTER_DEV_UNIX98,
+                        self.PTYMASTER_DEV_IBMAIX,))
+
+        master_fd = os.open(ptyc_device, os.O_RDWR | os.O_NOCTTY)
+
+        try:
+            errno = libc.grantpt(master_fd)
+            assert errno == 0, (
+                    'failed to grant slave pty device'
+                    ': %s, %s' % (ptyc_device, errno))
+
+            errno = libc.unlockpt(master_fd)
+            assert errno == 0, (
+                    'failed to unlock slave pty device'
+                    ': %s, %s' % (ptyc_device, errno))
+
+            slave_name = libc.ptsname(master_fd)
+
+            slave_fd = os.open(slave_name, os.O_RDWR | os.O_NOCTTY)
+
+        except Exception:
+            os.close(master_fd)
+            raise
+
+        os_name = sys.platform.lower()
+
+        if not os_name.startswith('aix'):
+            for arg, desc in (
+                    ('ptem', 'pseudo-terminal emulation module',),
+                    ('ldterm', 'terminal line discipline module',)):
+                try:
+                    fcntl.ioctl(slave_fd, fcntl.I_PUSH, arg)
+                except IOError as err:
+                    os.close(master_fd)
+                    os.close(slave_fd)
+                    raise IOError('failed to push %s, %s(7): '
+                                  '%s' % (description, arg, err,))
+
+        return master_fd, slave_fd
+
+    def _svr4_pty_fork(self):
+        """svr4_pty_fork() -> (pid, master_fd)
+
+        Fork and make the child a session leader with a controlling terminal.
+
+        This is an alternative to built-in ``pty.fork()``, which does not
+        work correctly on HP-UX, SunOS, or AIX. systems following AT&T
+        System V SVR4 conventions (streams).  It achieves this by using
+        ``svr4_openpty()``.
+        """
+        ## this is an exact replica of pty.fork(), except where noted by '##'.
+
+        master_fd, slave_fd = self._svr4_openpty()
+        if master_fd < 0 or slave_fd < 0:
+            raise ExceptionPexpect(
+                    'Could not open with _svr4_openpty(): '
+                    'master_fd=%s, slave_fd=%s' % (master_fd, slave_fd))
 
         pid = os.fork()
-        if pid < 0:
-            raise ExceptionPexpect("Failed os.fork().")
-        elif pid == 0:
-            # Child.
-            os.close(parent_fd)
-            self.__pty_make_controlling_tty(child_fd)
 
-            os.dup2(child_fd, 0)
-            os.dup2(child_fd, 1)
-            os.dup2(child_fd, 2)
+        if pid != pty.CHILD:
+            os.close(slave_fd)
 
-            if child_fd > 2:
-                os.close(child_fd)
-        else:
-            # Parent.
-            os.close(child_fd)
+        if pid == pty.CHILD:
+            # our file descriptors have forked also.  As the child,
+            # close `master_fd, the parent process will be using this to
+            # communicate with us.
+            os.close(master_fd)
 
-        return pid, parent_fd
+            self._make_controlling_tty(slave_fd)
 
-    def __pty_make_controlling_tty(self, tty_fd):
-        '''This makes the pseudo-terminal the controlling tty. This should be
-        more portable than the pty.fork() function. Specifically, this should
-        work on Solaris. '''
+            # duplicate slave_fd to stdin, stdout, and stderr
+            os.dup2(slave_fd, pty.STDIN_FILENO)
+            os.dup2(slave_fd, pty.STDOUT_FILENO)
+            os.dup2(slave_fd, pty.STDERR_FILENO)
 
-        child_name = os.ttyname(tty_fd)
+            if (slave_fd > pty.STDERR_FILENO):
+                os.close (slave_fd)
 
-        # Disconnect from controlling tty. Harmless if not already connected.
-        try:
-            fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-            if fd >= 0:
-                os.close(fd)
-        # which exception, shouldnt' we catch explicitly .. ?
-        except:
-            # Already disconnected. This happens if running inside cron.
-            pass
+        return pid, master_fd
 
+
+    def _make_controlling_tty(self, slave_fd):
+#        '''This makes the pseudo-terminal the controlling tty. This should be
+#        more portable than the pty.fork() function. Specifically, this should
+#        work on Solaris. '''
+#
+        slave_name = None
+        os_name = sys.platform.lower()
+
+        ## AIX will need to re-open its slave pty after fork(), keep a copy
+        ## of its slave pty device before the fork. AIX is untested XXX.
+        if os_name.startswith('aix'):
+            slave_name = os.ttyname(master_fd)
+
+        ## AIX: make slave_fd controlling terminal by opening /dev/tty,
+        ## and first, using ioctl TIOCNOTTY to unregister the inherited
+        ## terminal.
+        if (os_name.startswith('aix') and hasattr(termios, 'TIOCNOTTY')):
+            fd = None
+            try:
+                fd = open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+                ioctl(fd, termios.TIOCNOTTY, 0);
+            except (OSError, IOError) as err:
+                os.close(slave_fd)
+                if fd is not None:
+                    os.close(fd)
+                raise IOError('failed to make child controlling terminal'
+                              ': %s' % (err,))
+
+        # create session and set process group id.
         os.setsid()
 
-        # Verify we are disconnected from controlling tty
-        # by attempting to open it again.
-        try:
-            fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
-            if fd >= 0:
+        ## AIX Verification -- by opening /dev/tty again, after the first open
+        ## of /dev/tty with TIOCNOTTY and a call to setsid(), any subsequent
+        ## attempt to open the controlling /dev/tty using O_NOCTTY should fail.
+        if os_name.startswith('aix') and hasattr(termios, 'TIOCNOTTY'):
+            fd = None
+            try:
+                fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
                 os.close(fd)
-                raise ExceptionPexpect('Failed to disconnect from ' +
-                    'controlling tty. It is still possible to open /dev/tty.')
-        # which exception, shouldnt' we catch explicitly .. ?
-        except:
-            # Good! We are disconnected from a controlling tty.
-            pass
+                raise ExceptionPexpect(
+                        'Failed to disconnect from controlling tty. It is '
+                        'still possible to open /dev/tty (os_name=%s).' % (
+                            os_name,))
+            except (OSError, IOError):
+                pass
 
-        # Verify we can open child pty.
-        fd = os.open(child_name, os.O_RDWR)
-        if fd < 0:
-            raise ExceptionPexpect("Could not open child pty, " + child_name)
-        else:
+            try:
+                fd = os.open(slave_name, os.RDWR)
+            except (OSError, IOError) as err:
+                raise ExceptionPexpect(
+                        'Failed to open slave pty %s as controlling tty'
+                        ': %s' % (slave_name, err,))
             os.close(fd)
 
-        # Verify we now have a controlling tty.
-        fd = os.open("/dev/tty", os.O_WRONLY)
-        if fd < 0:
-            raise ExceptionPexpect("Could not open controlling tty, /dev/tty")
-        else:
+            try:
+                fd = open("/dev/tty", O_WRONLY);
+            except (OSError, IOError) as err:
+                raise ExceptionPexpect(
+                        'Failed to open controlling tty as /dev/tty'
+                        ': %s' % (err,))
             os.close(fd)
+
+        ## SunOS, HP-UX: make slave_fd controlling terminal by ioctl.
+        if not os_name.startswith('aix') and hasattr(termios, 'TIOCSCTTY'):
+            try:
+                fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+            except IOError as err:
+                os.close(slave_fd)
+                raise IOError('failed to make child controlling terminal '
+                        '%s: %s' % (slave_name, err))
+
+
+#        try:
+#            child_name = os.ttyname(tty_fd)
+#        except Exception, err:
+#            assert False, os.fdopen(tty_fd).name
+#
+#        # Disconnect from controlling tty. Harmless if not already connected.
+#        try:
+#            fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+#            if fd >= 0:
+#                os.close(fd)
+#
+#        # which exception, shouldnt' we catch explicitly .. ?
+#        except Exception, err:
+#            assert False, err
+#            # Already disconnected. This happens if running inside cron.
+#            pass
+#
+#        os.setsid()
+#
+#        # Verify we are disconnected from controlling tty
+#        # by attempting to open it again.
+#        try:
+#            fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+#            if fd >= 0:
+#                os.close(fd)
+#                raise ExceptionPexpect('Failed to disconnect from ' +
+#                    'controlling tty. It is still possible to open /dev/tty.')
+#        # which exception, shouldnt' we catch explicitly .. ?
+#        except:
+#            # Good! We are disconnected from a controlling tty.
+#            pass
+#
+#        # Verify we can open child pty.
+#        fd = os.open(child_name, os.O_RDWR)
+#        if fd < 0:
+#            raise ExceptionPexpect("Could not open child pty, " + child_name)
+#        else:
+#            os.close(fd)
+#
+#        # Verify we now have a controlling tty.
+#        fd = os.open("/dev/tty", os.O_WRONLY)
+#        if fd < 0:
+#            raise ExceptionPexpect("Could not open controlling tty, /dev/tty")
+#        else:
+#            os.close(fd)
+
+
 
     def fileno(self):
         '''This returns the file descriptor of the pty for the child.
@@ -830,8 +999,6 @@ class spawn(object):
             p.expect(['abcd'])
             p.expect(['wxyz'])
         '''
-
-        self.child_fd
         attr = termios.tcgetattr(self.child_fd)
         if state:
             attr[3] = attr[3] | termios.ECHO
@@ -1075,40 +1242,14 @@ class spawn(object):
         It is the responsibility of the caller to ensure the eof is sent at the
         beginning of a line. '''
 
-        ### Hmmm... how do I send an EOF?
-        ###C  if ((m = write(pty, *buf, p - *buf)) < 0)
-        ###C      return (errno == EWOULDBLOCK) ? n : -1;
-        #fd = sys.stdin.fileno()
-        #old = termios.tcgetattr(fd) # remember current state
-        #attr = termios.tcgetattr(fd)
-        #attr[3] = attr[3] | termios.ICANON # ICANON must be set to see EOF
-        #try: # use try/finally to ensure state gets restored
-        #    termios.tcsetattr(fd, termios.TCSADRAIN, attr)
-        #    if hasattr(termios, 'CEOF'):
-        #        os.write(self.child_fd, '%c' % termios.CEOF)
-        #    else:
-        #        # Silly platform does not define CEOF so assume CTRL-D
-        #        os.write(self.child_fd, '%c' % 4)
-        #finally: # restore state
-        #    termios.tcsetattr(fd, termios.TCSADRAIN, old)
-        if hasattr(termios, 'VEOF'):
-            char = ord(termios.tcgetattr(self.child_fd)[6][termios.VEOF])
-        else:
-            # platform does not define VEOF so assume CTRL-D
-            char = 4
-        self.send(self._chr(char))
+        self.send(self._chr(termios.CEOF))
 
     def sendintr(self):
 
         '''This sends a SIGINT to the child. It does not require
         the SIGINT to be the first character on a line. '''
 
-        if hasattr(termios, 'VINTR'):
-            char = ord(termios.tcgetattr(self.child_fd)[6][termios.VINTR])
-        else:
-            # platform does not define VINTR so assume CTRL-C
-            char = 3
-        self.send(self._chr(char))
+        self.send(self._chr(termios.CINTR))
 
     def eof(self):
 
@@ -1189,82 +1330,64 @@ class spawn(object):
         return self.exitstatus
 
     def isalive(self):
+        """S.isalive() -> bool
 
-        '''This tests if the child process is running or not. This is
-        non-blocking. If the child was terminated then this will read the
-        exitstatus or signalstatus of the child. This returns True if the child
-        process appears to be running or False if not. It can take literally
-        SECONDS for Solaris to return the right status. '''
+        Returns True if the child process appears to be running.
+
+        This call is usually non-blocking, unless child has sent EOF
+        but has not yet changed state on Linux or BSD. If the child
+        was terminated, then this will read the exit or signal status
+        of the child.
+        """
 
         if self.terminated:
             return False
 
-        if self.flag_eof:
-            # This is for Linux, which requires the blocking form
-            # of waitpid to # get status of a defunct process.
-            # This is super-lame. The flag_eof would have been set
-            # in read_nonblocking(), so this should be safe.
-            waitpid_options = 0
-        else:
-            waitpid_options = os.WNOHANG
+        # If flag_eof was set in read_nonblocking(), it is because EOF was
+        # received, so do not use the non-blocking WNOHANG version of waitpid.
+        # Rather, block until exit status is available.
+        waitpid_options = 0 if self.flag_eof else os.WNOHANG
 
-        try:
-            pid, status = os.waitpid(self.pid, waitpid_options)
-        except OSError:
-            err = sys.exc_info()[1]
-            # No child processes
-            if err.errno == errno.ECHILD:
-                raise ExceptionPexpect('isalive() encountered condition ' +
-                        'where "terminated" is 0, but there was no child ' +
-                        'process. Did someone else call waitpid() ' +
-                        'on our process?')
-            else:
-                raise err
+        waitpid_echild = ('isalive() encountered a condition where someone '
+                          'outside of pexpect likely made a call to waitpid() '
+                          'on our child process-id %s' % (self.pid,))
 
-        # I have to do this twice for Solaris.
-        # I can't even believe that I figured this out...
-        # If waitpid() returns 0 it means that no child process
-        # wishes to report, and the value of status is undefined.
-        if pid == 0:
+        pid = 0
+        for _ in range(2):
+            # do not believe the first return value of waitpid, on at
+            # least Solaris, the first call returns 0, but the second
+            # one will not. XXX check -jquast XXX
             try:
-                ### os.WNOHANG) # Solaris!
                 pid, status = os.waitpid(self.pid, waitpid_options)
-            except OSError as e:
-                # This should never happen...
-                if e.errno == errno.ECHILD:
-                    raise ExceptionPexpect('isalive() encountered condition ' +
-                            'that should never happen. There was no child ' +
-                            'process. Did someone else call waitpid() ' +
-                            'on our process?')
-                else:
-                    raise
-
-            # If pid is still 0 after two calls to waitpid() then the process
-            # really is alive. This seems to work on all platforms, except for
-            # Irix which seems to require a blocking call on waitpid or select,
-            # so I let read_nonblocking take care of this situation
-            # (unfortunately, this requires waiting through the timeout).
-            if pid == 0:
-                return True
-
-        if pid == 0:
+                if pid != 0:
+                    break
+            except OSError as err:
+                if err.errno == errno.ECHILD:
+                    raise ExceptionPexpect(waitpid_echild)
+                raise
+        else:
             return True
 
         if os.WIFEXITED(status):
+            # child exited normally, gather exit status
             self.status = status
             self.exitstatus = os.WEXITSTATUS(status)
             self.signalstatus = None
             self.terminated = True
+
         elif os.WIFSIGNALED(status):
+            # child exited due to signal (SIGKILL, SIGTERM).
             self.status = status
             self.exitstatus = None
             self.signalstatus = os.WTERMSIG(status)
             self.terminated = True
+
         elif os.WIFSTOPPED(status):
-            raise ExceptionPexpect('isalive() encountered condition ' +
-                    'where child process is stopped. This is not ' +
-                    'supported. Is some other process attempting ' +
-                    'job control with our child pid?')
+            raise ExceptionPexpect('isalive() encountered a condition '
+                'where child process is stopped. This is not '
+                'supported. Is some other process attempting '
+                'job control with our child pid?')
+
         return False
 
     def kill(self, sig):
@@ -2041,4 +2164,43 @@ def split_command_line(command_line):
         arg_list.append(arg)
     return arg_list
 
+
+#    def __fork_pty(self):
+#        '''This implements a substitute for the forkpty system call. This
+#        should be more portable than the pty.fork() function. Specifically,
+#        this should work on Solaris.
+#
+#        Modified 10.06.05 by Geoff Marshall: Implemented __fork_pty() method to
+#        resolve the issue with Python's pty.fork() not supporting Solaris,
+#        particularly ssh. Based on patch to posixmodule.c authored by Noah
+#        Spurrier::
+#
+#            http://mail.python.org/pipermail/python-dev/2003-May/035281.html
+#
+#        '''
+#
+#        parent_fd, child_fd = pty.openpty()
+#        if parent_fd < 0 or child_fd < 0:
+#            raise ExceptionPexpect("Could not open with os.openpty().")
+#
+#        pid = os.fork()
+#        if pid < 0:
+#            raise ExceptionPexpect("Failed os.fork().")
+#        elif pid == 0:
+#            # Child.
+#            os.close(parent_fd)
+#            self.__pty_make_controlling_tty(child_fd)
+#
+#            os.dup2(child_fd, 0)
+#            os.dup2(child_fd, 1)
+#            os.dup2(child_fd, 2)
+#
+#            if child_fd > 2:
+#                os.close(child_fd)
+#        else:
+#            # Parent.
+#            os.close(child_fd)
+#
+#        return pid, parent_fd
+#
 # vi:set sr et ts=4 sw=4 ft=python :

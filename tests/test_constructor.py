@@ -33,7 +33,7 @@ class TestCaseConstructor(PexpectTestCase.PexpectTestCase):
         p2 = pexpect.spawn('/bin/ls' ,['-l', '/bin'])
         p1.expect (pexpect.EOF)
         p2.expect (pexpect.EOF)
-        assert (p1.before == p2.before)
+        assert (p1.before == p2.before), (p1.before, p2.before)
 
     def test_named_parameters (self):
         '''This tests that named parameters work.

@@ -24,6 +24,7 @@ import pexpect
 import unittest
 import PexpectTestCase
 import time
+import termios
 import sys
 
 if sys.version_info[0] >= 3:
@@ -53,16 +54,29 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
             msg = msg + str(err)
             self.fail(msg)
 
+    def test_sendeof (self):
+        child = None
+        try:
+            child = pexpect.spawn('python getch.py')
+            child.expect('READY', timeout=5)
+            child.sendeof()
+            child.expect ('{0}\r\n'.format(termios.CEOF))
+        except Exception:
+            err = sys.exc_info()[1]
+            self.fail("Did not echo character value: %s, %s\n%s" % (
+                repr(chr(termios.CEOF)), str(err), child))
+
     def test_sendintr (self):
+        child = None
         try:
             child = pexpect.spawn('python getch.py')
             child.expect('READY', timeout=5)
             child.sendintr()
-            child.expect ('3\r\n')
+            child.expect ('{0}\r\n'.format(termios.CINTR))
         except Exception:
             err = sys.exc_info()[1]
-            self.fail("Did not echo character value: 3, %s\n%s\n%s" % (
-                str(err), child.before, child.after,))
+            self.fail("Did not echo character value: %s, %s\n%s" % (
+                repr(chr(termios.CINTR)), str(err), child))
 
     def test_bad_sendcontrol_chars (self):
         '''This tests that sendcontrol will return 0 for an unknown char. '''
