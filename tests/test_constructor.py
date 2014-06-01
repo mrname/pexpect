@@ -31,10 +31,12 @@ class TestCaseConstructor(PexpectTestCase.PexpectTestCase):
         '''
         p1 = pexpect.spawn('/bin/ls -i /bin')
         p1.expect(pexpect.EOF)
+        self.assertFalse(p1.isalive())
         self.assertEqual(0, p1.exitstatus)
 
         p2 = pexpect.spawn('/bin/ls', ['-i', '/bin'])
         p2.expect(pexpect.EOF)
+        self.assertFalse(p2.isalive())
         self.assertEqual(0, p2.exitstatus)
 
         self.assertEqual(p1.before, p2.before)
@@ -44,15 +46,18 @@ class TestCaseConstructor(PexpectTestCase.PexpectTestCase):
         '''
         p = pexpect.spawn('/bin/ls',timeout=5)
         p.expect(pexpect.EOF)
+        self.assertFalse(p.isalive())
         self.assertEqual(0, p.exitstatus)
 
         p = pexpect.spawn(timeout=5, command='/bin/ls')
         p.expect(pexpect.EOF)
+        self.assertFalse(p.isalive())
         self.assertEqual(0, p.exitstatus)
 
         p = pexpect.spawn(args=[], command='/bin/ls',
                           cwd='/bin', env={'TERM':'vt220'})
         p.expect(pexpect.EOF)
+        self.assertFalse(p.isalive())
         self.assertEqual(0, p.exitstatus)
 
 if __name__ == '__main__':
