@@ -643,10 +643,14 @@ class spawn(object):
 
         if self.pid == 0:
             # Child.
-
             # re-set child_fd, used by setwinsize().
             self.child_fd = pty.STDIN_FILENO
             self.setwinsize(24, 80)
+
+            if not self.echo:
+                # disable echo on slave_fd for (some) systems *after* fork,
+                # where it is required by systems that were not handled priori
+                self.setecho(self.echo)
 
             if self.ignore_sighup:
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -774,16 +778,9 @@ class spawn(object):
             master_fd, child_fd = pty.openpty()
 
         if not self.echo:
-            # when echo is set False in spawn() or run(), disable echo on
-            # master_fd for most systems, unless it raises an OSError, such as
-            # on SVR4 systems, prior to fork() and execv*().
-            try:
-                self.setecho(self.echo, tty_fd=master_fd)
-            except OSError as err:
-                if err.args[0] == 22 and args[1].startswith('Invalid argument'):
-                    self.setecho(self.echo, tty_fd=child_fd)
-                else:
-                    raise
+            # disable echo on slave_fd for (some) systems, where it is required
+            # to do so only before fork() and not after.
+            self.setecho(self.echo, tty_fd=child_fd)
 
         pid = os.fork()
 
@@ -803,13 +800,11 @@ class spawn(object):
                 os.close(child_fd)
 
             # Close any other file descriptors inherited from parent
-            softlimit_max_nofiles, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
-            os.closerange(3, softlimit_max_nofiles)
+            os.closerange(3, resource.getrlimit(resource.RLIMIT_NOFILE)[0])
 
         else:
             # Parent.
             os.close(child_fd)
-
 
         # always return the master_fd, even from the child process.
         return pid, master_fd
