@@ -774,10 +774,16 @@ class spawn(object):
             master_fd, child_fd = pty.openpty()
 
         if not self.echo:
-            # disable echo from child pty. On SVR4 systems, this may only be
-            # set on the child_fd by the main process on the slave_pty *prior*
-            # to fork!
-            self.setecho(self.echo, tty_fd=child_fd)
+            # when echo is set False in spawn() or run(), disable echo on
+            # master_fd for most systems, unless it raises an OSError, such as
+            # on SVR4 systems, prior to fork() and execv*().
+            try:
+                self.setecho(self.echo, tty_fd=master_fd)
+            except OSError as err:
+                if err.args[0] == 22 and args[1].startswith('Invalid argument'):
+                    self.setecho(self.echo, tty_fd=child_fd)
+                else:
+                    raise
 
         pid = os.fork()
 
