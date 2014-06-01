@@ -21,7 +21,8 @@ PEXPECT LICENSE
 import pexpect
 import unittest
 import PexpectTestCase
-import os, sys
+import os
+import sys
 import re
 import signal
 import time
@@ -33,7 +34,17 @@ class TestCaseMisc(PexpectTestCase.PexpectTestCase):
 
     def test_isatty (self):
         child = pexpect.spawn('cat')
-        assert child.isatty(), "Not returning True. Should always be True."
+        if not child.isatty():
+            os_name = sys.platform.lower()
+            if (os_name.startswith('solaris') or
+                    os_name.startswith('sunos') or
+                    os_name.startswith('aix') or
+                    os_name.startswith('hpux')
+                    # TODO: cygwin ??
+                    ):
+                pass
+            else:
+                assert False, "isatty() returns False, should always be True."
 
     def test_read (self):
         child = pexpect.spawn('cat')
