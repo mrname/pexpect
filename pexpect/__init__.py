@@ -1728,13 +1728,21 @@ class spawn(object):
             raise
 
     def getwinsize(self):
-
-        '''This returns the terminal window size of the child tty. The return
-        value is a tuple of (rows, cols). '''
+        '''This returns the terminal window size of the child tty.  The return
+        value is a tuple of (rows, cols). This call raises OSError on platforms
+        where it is not supported (Solaris).  '''
 
         TIOCGWINSZ = getattr(termios, 'TIOCGWINSZ', 1074295912)
         s = struct.pack('HHHH', 0, 0, 0, 0)
-        x = fcntl.ioctl(self.child_fd, TIOCGWINSZ, s)
+        try:
+            x = fcntl.ioctl(self.child_fd, TIOCGWINSZ, s)
+        except IOError as err:
+            if err.args == (22, 'Invalid argument'):
+                errno = err.args[0]
+                msg = ('%s: getwinsize() may not be called on this platform.'
+                       % (err.args[1],))
+                raise OSError(errno, msg,)
+            raise
         return struct.unpack('HHHH', x)[0:2]
 
     def setwinsize(self, rows, cols):
@@ -1743,7 +1751,8 @@ class spawn(object):
         a SIGWINCH signal to be sent to the child. This does not change the
         physical window size. It changes the size reported to TTY-aware
         applications like vi or curses -- applications that respond to the
-        SIGWINCH signal. '''
+        SIGWINCH signal. This call has no effect on platforms where it is not
+        supported (Solaris).  '''
 
         # Some very old platforms have a bug that causes the value for
         # termios.TIOCSWINSZ to be truncated. There was a hack here to work
