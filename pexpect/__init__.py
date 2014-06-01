@@ -669,7 +669,11 @@ class spawn(object):
 
         # Parent
         self.setwinsize(24, 80)
-        self.setecho(self.echo)
+        try:
+            self.setecho(self.echo)
+        except OSError:
+            # Solaris, etc. cannot set echo from master
+            pass
         self.terminated = False
         self.closed = False
 
