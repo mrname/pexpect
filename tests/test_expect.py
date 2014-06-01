@@ -77,7 +77,7 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         self.assertFalse(child.isalive())
         self.assertEqual(0, child.exitstatus)
 
-    def _send_123(self, child)
+    def _send_123(self, child):
         child.sendline(b'ONE')
         child.sendline(b'TWO')
         child.sendline(b'THREE')
