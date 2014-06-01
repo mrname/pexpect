@@ -1736,19 +1736,18 @@ class spawn(object):
         '''This returns the terminal window size of the child tty.  The return
         value is a tuple of (rows, cols). This call raises OSError on platforms
         where it is not supported (Solaris).  '''
-
+        msg_nosupport = 'getwinsize() may not be called on this platform.'
         TIOCGWINSZ = getattr(termios, 'TIOCGWINSZ', 1074295912)
         s = struct.pack('HHHH', 0, 0, 0, 0)
         try:
             x = fcntl.ioctl(self.child_fd, TIOCGWINSZ, s)
         except IOError as err:
             if err.args == (22, 'Invalid argument'):
-                errno = err.args[0]
-                msg = ('%s: getwinsize() may not be called on this platform.'
-                       % (err.args[1],))
-                raise OSError(errno, msg,)
+                raise OSError(err.args[0], ('%s: %s' % (err.args[1], msg_nosupport)),)
             raise
-        return struct.unpack('HHHH', x)[0:2]
+        rows, cols, _, _ = struct.unpack('HHHH', x)
+        # XXX Should we raise OSError/nosupport when rows == cols == 0?
+        return (rows, cols)
 
     def setwinsize(self, rows, cols):
 

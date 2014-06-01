@@ -21,35 +21,32 @@ PEXPECT LICENSE
 import pexpect
 import unittest
 import PexpectTestCase
-import time
+
 
 class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
 
-    def test_getwinsize(self):
-        """ Default winsize should be 24x80. """
+    def _getwinsize(self, rows, cols):
+        """ getwinsize provides want_rows & _cols """
         # given,
         child = pexpect.spawn('cat')
-        want_rows, want_cols = 24, 80
 
         # exercise,
         try:
-            def_rows, def_cols = child.getwinsize()
+            got_rows, got_cols = child.getwinsize()
         except OSError as err:
             if err.args[0] == 22:
-                self.assertTrue(err.args[1].startswith(
-                    'Invalid argument: getwinsize() may not be '
-                    'called on this platform'))
+                self.assertTrue(err.args[1].endswith(
+                    ': getwinsize() may not be called on this platform'))
                 raise unittest.SkipTest("getwinsize() not supported")
             raise
 
         # verify,
-        self.assertEqual((def_rows, def_cols), (want_rows, want_cols))
+        self.assertEqual((got_rows, got_cols), (rows, cols))
 
     def _setwinsize(self, rows, cols):
-        """ Child process should receive sigwinch on TIOCSWINSZ. """
+        """ child process receives rows, cols. """
         # given,
         child = pexpect.spawn('%s sigwinch_report.py' % self.PYTHONBIN)
-        want_rows, want_cols = rows, cols
         re_sigwinch = b'SIGWINCH: \(([0-9]*), ([0-9]*)\)'
         table = [pexpect.TIMEOUT, re_sigwinch,]
         want_index = table.index(re_sigwinch)
@@ -57,21 +54,33 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
 
         # exercise,
         child.expect('READY', timeout=5)
-        child.setwinsize (want_rows, want_cols)
+        child.setwinsize (rows, cols)
         index = child.expect(table, timeout=5)
 
-        # verify,
+        # skip,
         if index == time_index:
             raise unittest.SkipTest("this platform may not support sigwinch")
 
+        # verify,
         self.assertEqual(index, want_index)
         got_rows, got_cols = map(int, child.match.group(1, 2))
-        self.assertEqual((got_rows, got_cols), (want_rows, want_cols))
+        self.assertEqual((got_rows, got_cols), (rows, cols))
+
+    def test_default_winsize_24_80(self):
+        self._getwinsize(24, 80)
 
     def test_setwinsize_11_22(self):
         """ Test child process accepts SIGWINCH for window size 11x22. """
         self._setwinsize(11, 22)
 
+    def test_set_then_getwinsize_11_22(self):
+        """ Test child process accepts SIGWINCH for window size 11x22. """
+        self._setwinsize(11, 22)
+        # Fascinating. Returns 80x24 on OSX
+        try:
+            self._getwinsize(11, 22)
+        except AssertionError, err:
+            raise unittest.SkipTest("getwinsize() bad on your platform: %s" % (err,))
 
 if __name__ == '__main__':
     unittest.main()
