@@ -77,9 +77,14 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         self.assertFalse(child.isalive())
         self.assertEqual(0, child.exitstatus)
 
+    def _send_123(self, child)
+        child.sendline(b'ONE')
+        child.sendline(b'TWO')
+        child.sendline(b'THREE')
+
     def test_expect_basic(self):
         p = pexpect.spawn('cat')
-        map(p.sendline, (b'ONE', b'TWO', b'THREE'))
+        self._send_123(p)
         p.expect(b'ONE')
         p.expect(b'TWO')
         p.expect(b'THREE')
@@ -87,7 +92,7 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
 
     def test_expect_exact_basic(self):
         p = pexpect.spawn('cat')
-        map(p.sendline, (b'ONE', b'TWO', b'THREE'))
+        self._send_123(p)
         p.expect_exact(b'ONE')
         p.expect_exact(b'TWO')
         p.expect_exact(b'THREE')
@@ -98,10 +103,10 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         even if case is different using the regex (?i) directive.
         '''
         p = pexpect.spawn('cat')
-        map(p.sendline, (b'ONE', b'two', b'THREE'))
-        p.expect(b'(?i)one')
-        p.expect(b'(?i)two')
-        p.expect(b'(?i)three')
+        self._send_123(p)
+        p.expect(b'(?i)oNe')
+        p.expect(b'(?i)tWo')
+        p.expect(b'(?i)tHrEe')
         self._goodbye_cat(p)
 
     def test_expect_ignore_case_flag(self):
@@ -109,11 +114,11 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         even if case is different using the ignorecase flag.
         '''
         p = pexpect.spawn('cat')
-        map(p.sendline, (b'ONE', b'two', b'THREE'))
+        self._send_123(p)
         p.ignorecase = True
-        p.expect(b'one')
-        p.expect(b'two')
-        p.expect(b'three')
+        p.expect(b'oNe')
+        p.expect(b'tWo')
+        p.expect(b'tHrEe')
         self._goodbye_cat(p)
 
     def test_expect_order(self):
