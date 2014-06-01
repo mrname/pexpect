@@ -31,33 +31,22 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
         This makes use of an external script sigwinch_report.py.
         '''
         p1 = pexpect.spawn('%s sigwinch_report.py' % self.PYTHONBIN)
-        p1.expect('READY', timeout=10)
+        p1.expect('READY', timeout=5)
+
+        table = [pexpect.TIMEOUT, b'SIGWINCH: \(([0-9]*), ([0-9]*)\)', ]
 
         p1.setwinsize (11,22)
-        index = p1.expect ([pexpect.TIMEOUT, b'SIGWINCH: \(([0-9]*), ([0-9]*)\)'],
-                                       timeout=30)
-        if index == 0:
+        index = p1.expect (table, timeout=5)
+        if index == table.index(pexpect.TIMEOUT):
             self.fail("TIMEOUT -- this platform may not support sigwinch properly.\n" + str(p1))
         self.assertEqual(p1.match.group(1, 2), (b"11" ,b"22"))
         self.assertEqual(p1.getwinsize(), (11, 22))
 
-        time.sleep(1)
         p1.setwinsize (24,80)
-        index = p1.expect ([pexpect.TIMEOUT, b'SIGWINCH: \(([0-9]*), ([0-9]*)\)'],
-                                       timeout=10)
-        if index == 0:
-            self.fail ("TIMEOUT -- this platform may not support sigwinch properly.\n" + str(p1))
+        index = p1.expect (table, timeout=10)
         self.assertEqual(p1.match.group(1, 2), (b"24" ,b"80"))
         self.assertEqual(p1.getwinsize(), (24, 80))
 
-        p1.close()
-
-#    def test_parent_resize (self):
-#        pid = os.getpid()
-#        p1 = pexpect.spawn('%s sigwinch_report.py' % self.PYTHONBIN)
-#        time.sleep(10)
-#        p1.setwinsize (11,22)
-#        os.kill (pid, signal.SIGWINCH)
 
 if __name__ == '__main__':
     unittest.main()
