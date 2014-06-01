@@ -38,35 +38,50 @@ class UnicodeTests(PexpectTestCase.PexpectTestCase):
         '''This tests that echo can be turned on and off.
         '''
         p = pexpect.spawnu('cat', timeout=10)
-        self._expect_echo(p)
+        self._expect_echo_on(p)
+        self._expect_echo_on2(p)
+
+        p = pexpect.spawnu('cat', timeout=10, echo=False)
+        p.expect = p.expect_exact
+        self._expect_echo_off(p)
 
     def test_expect_echo_exact (self):
         '''Like test_expect_echo(), but using expect_exact().
         '''
         p = pexpect.spawnu('cat', timeout=10)
         p.expect = p.expect_exact
-        self._expect_echo(p)
+        self._expect_echo_on(p)
+        self._expect_echo_on2(p)
 
-    def _expect_echo (self, p):
+        p = pexpect.spawnu('cat', timeout=10, echo=False)
+        p.expect = p.expect_exact
+        self._expect_echo_off(p)
+
+    def _expect_echo_on (self, p):
+        assert p.echo is True
         p.sendline('1234') # Should see this twice (once from tty echo and again from cat).
         index = p.expect (['1234', 'abcdé', 'wxyz', pexpect.EOF, pexpect.TIMEOUT])
         assert index == 0, (index, p.before)
         index = p.expect (['1234', 'abcdé', 'wxyz', pexpect.EOF])
         assert index == 0, index
-        p.setecho(0) # Turn off tty echo
-        p.sendline('abcdé') # Now, should only see this once.
-        p.sendline('wxyz') # Should also be only once.
-        index = p.expect ([pexpect.EOF,pexpect.TIMEOUT, 'abcdé', 'wxyz', '1234'])
-        assert index == 2, index
-        index = p.expect ([pexpect.EOF, 'abcdé', 'wxyz', '7890'])
-        assert index == 2, index
-        p.setecho(1) # Turn on tty echo
+
+    def _expect_echo_on2(self, p):
+        assert p.echo is True
         p.sendline('7890') # Should see this twice.
         index = p.expect ([pexpect.EOF, 'abcdé', 'wxyz', '7890'])
         assert index == 3, index
         index = p.expect ([pexpect.EOF, 'abcdé', 'wxyz', '7890'])
         assert index == 3, index
         p.sendeof()
+
+    def _expect_echo_off(self, p):
+        assert p.echo is False
+        p.sendline('abcdé') # Now, should only see this once.
+        p.sendline('wxyz') # Should also be only once.
+        index = p.expect ([pexpect.EOF,pexpect.TIMEOUT, 'abcdé', 'wxyz', '1234'])
+        assert index == 2, index
+        index = p.expect ([pexpect.EOF, 'abcdé', 'wxyz', '7890'])
+        assert index == 2, index
 
     def test_log_unicode(self):
         msg = "abcΩ÷"

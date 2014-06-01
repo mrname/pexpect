@@ -33,7 +33,7 @@ import signal
 # This may not be true, but seems adequate for testing now.
 # I should fix this at some point.
 
-# query: For some reason an extra newline occures under OS X evey
+# query: For some reason an extra newline occurs under OS X every
 # once in a while. Excessive uses of .replace resolve these
 
 FILTER=''.join([(len(repr(chr(x)))==3) and chr(x) or '.' for x in range(256)])
@@ -126,71 +126,82 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         p.expect (pexpect.EOF)
 
     def test_expect_order (self):
-        '''This tests that patterns are matched in the same order as given in the pattern_list.
-
-        (Or does it?  Doesn't it also pass if expect() always chooses
-        (one of the) the leftmost matches in the input? -- grahn)
-        ... agreed! -jquast, the buffer ptr isn't forwarded on match, see first two test cases
-        '''
-        p = pexpect.spawn('cat')
+        '''This tests priority-order matching of expect method.'''
+        p = pexpect.spawn('cat', echo=False)
         self._expect_order(p)
 
     def test_expect_order_exact (self):
-        '''Like test_expect_order(), but using expect_exact().
-        '''
-        p = pexpect.spawn('cat')
+        '''Like test_expect_order(), but using expect_exact().'''
+        p = pexpect.spawn('cat', echo=False)
         p.expect = p.expect_exact
         self._expect_order(p)
 
     def _expect_order (self, p):
-        # Disable echo so that the output we see is in an entirely predictable
-        # order
-        p.setecho(False)
-        p.waitnoecho()
+        (ONE, TWO, THREE, FOUR, JUNK) = (
+            b'alpha', b'beta', b'gamma', b'delta', b'epsilon', )
+        map(p.sendline, (ONE, TWO, THREE, FOUR,))
+        p.sendeof()
 
-        p.sendline (b'1234')
-        p.sendline (b'abcd')
-        p.sendline (b'wxyz')
-        p.sendline (b'7890')
-        p.sendeof ()
-        index = p.expect ([
-            b'1234',
-            b'abcd',
-            b'wxyz',
-            pexpect.EOF,
-            b'7890' ])
-        assert index == 0, (index, p.before, p.after)
-        index = p.expect ([
-            b'54321',
-            pexpect.TIMEOUT,
-            b'1234',
-            b'abcd',
-            b'wxyz',
-            pexpect.EOF], timeout=5)
-        assert index == 3, (index, p.before, p.after)
-        index = p.expect ([
-            b'54321',
-            pexpect.TIMEOUT,
-            b'1234',
-            b'abcd',
-            b'wxyz',
-            pexpect.EOF], timeout=5)
-        assert index == 4, (index, p.before, p.after)
-        index = p.expect ([
-            pexpect.EOF,
-            b'abcd',
-            b'wxyz',
-            b'7890' ])
-        assert index == 3, (index, p.before, p.after)
+        table = [ONE, TWO, THREE, pexpect.EOF, FOUR, ]
+        #        ^
+        want_index = table.index(ONE)
+        index = p.expect(table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
 
-        index = p.expect ([
-            b'abcd',
-            b'wxyz',
-            b'7890',
-            pexpect.EOF])
-        assert index == 3, (index, p.before, p.after)
+        table = [JUNK, pexpect.TIMEOUT, ONE, TWO, THREE, pexpect.EOF, ]
+        #                                    ^
+        want_index = table.index(TWO)
+        index = p.expect(table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
 
-    def test_waitnoecho (self):
+        table = [JUNK, pexpect.TIMEOUT, ONE, TWO, THREE, pexpect.EOF, ]
+        #                                         ^
+        want_index = table.index(THREE)
+        index = p.expect(table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
+
+        table = [pexpect.EOF, TWO, THREE, FOUR, ]
+        #                                 ^
+        want_index = table.index(FOUR)
+        index = p.expect(table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
+
+        table = [TWO, THREE, FOUR, pexpect.EOF]
+        #                          ^
+        want_index = table.index(pexpect.EOF)
+        index = p.expect(table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
+
+        # it is possible to re-expect EOF multiple times
+        want_index = table.index(pexpect.EOF)
+        index = p.expect(table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
+
+    def test_waitnoecho(self):
 
         ''' This tests that we can wait on a child process to set echo mode.
         For example, this tests that we could wait for SSH to set ECHO False
@@ -199,39 +210,80 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
 
         p1 = pexpect.spawn('%s echo_wait.py' % self.PYTHONBIN)
         start = time.time()
-        p1.waitnoecho(timeout=10)
+        try:
+            p1.waitnoecho(timeout=10)
+        except OSError as err:
+            if err.args[0] == 22:
+                assert err.args[1].startswith('Invalid argument: getecho() may not be '
+                                              'called on this platform')
+                raise unittest.SkipTest
+            raise
         end_time = time.time() - start
         assert end_time < 10 and end_time > 2, "waitnoecho did not set ECHO off in the expected window of time."
 
-        # test that we actually timeout and return False if ECHO is never set off.
+    def test_waitnoecho_default_timeout(self):
+        ' This one is mainly here to test default timeout for code coverage. '
+        p1 = pexpect.spawn('%s echo_wait.py' % self.PYTHONBIN)
+        start = time.time()
+        try:
+            p1.waitnoecho()
+        except OSError as err:
+            if err.args[0] == 22:
+                assert err.args[1].startswith('Invalid argument: getecho() may not be '
+                                              'called on this platform')
+                raise unittest.SkipTest
+            raise
+
+        end_time = time.time() - start
+        assert end_time < 10, "waitnoecho did not set ECHO off in the expected window of time."
+
+    def test_waitnoecho_cat(self):
+        ' test that we actually timeout and return False if ECHO is never set off. '
         p1 = pexpect.spawn('cat')
         start = time.time()
-        retval = p1.waitnoecho(timeout=4)
+        try:
+            retval = p1.waitnoecho(timeout=4)
+        except OSError as err:
+            if err.args[0] == 22:
+                assert err.args[1].startswith('Invalid argument: getecho() may not be '
+                                              'called on this platform')
+                raise unittest.SkipTest
+            raise
+
         end_time = time.time() - start
         assert end_time > 3, "waitnoecho should have waited longer than 2 seconds. retval should be False, retval=%d"%retval
         assert retval==False, "retval should be False, retval=%d"%retval
-
-        # This one is mainly here to test default timeout for code coverage.
-        p1 = pexpect.spawn('%s echo_wait.py' % self.PYTHONBIN)
-        start = time.time()
-        p1.waitnoecho()
-        end_time = time.time() - start
-        assert end_time < 10, "waitnoecho did not set ECHO off in the expected window of time."
 
     def test_expect_echo (self):
         '''This tests that echo can be turned on and off.
         '''
         p = pexpect.spawn('cat', timeout=10)
-        self._expect_echo(p)
+        self._expect_echo_on(p)
+
+        p = pexpect.spawn('cat', timeout=10, echo=True)
+        self._expect_echo_on2(p)
+
+        p = pexpect.spawn('cat', timeout=10, echo=False)
+        self._expect_echo_off(p)
+
 
     def test_expect_echo_exact (self):
         '''Like test_expect_echo(), but using expect_exact().
         '''
-        p = pexpect.spawn('cat', timeout=10)
+        p = pexpect.spawn('cat', timeout=10)  # echo=True is default
         p.expect = p.expect_exact
-        self._expect_echo(p)
+        self._expect_echo_on(p)
 
-    def _expect_echo (self, p):
+        p = pexpect.spawn('cat', timeout=10, echo=True)
+        p.expect = p.expect_exact
+        self._expect_echo_on2(p)
+
+        p = pexpect.spawn('cat', timeout=10, echo=False)
+        p.expect = p.expect_exact
+        self._expect_echo_off(p)
+
+    def _expect_echo_on(self, p):
+        assert p.echo is True
         p.sendline (b'1234') # Should see this twice (once from tty echo and again from cat).
         index = p.expect ([
             b'1234',
@@ -239,30 +291,16 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
             b'wxyz',
             pexpect.EOF,
             pexpect.TIMEOUT])
-        assert index == 0, "index="+str(index)+"\n"+p.before
+        assert index == 0, (index, str(p))
         index = p.expect ([
             b'1234',
             b'abcd',
             b'wxyz',
             pexpect.EOF])
-        assert index == 0, "index="+str(index)
-        p.setecho(0) # Turn off tty echo
-        p.sendline (b'abcd') # Now, should only see this once.
-        p.sendline (b'wxyz') # Should also be only once.
-        index = p.expect ([
-            pexpect.EOF,
-            pexpect.TIMEOUT,
-            b'abcd',
-            b'wxyz',
-            b'1234'])
-        assert index == 2, "index="+str(index)
-        index = p.expect ([
-            pexpect.EOF,
-            b'abcd',
-            b'wxyz',
-            b'7890'])
-        assert index == 2, "index="+str(index)
-        p.setecho(1) # Turn on tty echo
+        assert index == 0, (index, str(p))
+
+    def _expect_echo_on2(self, p):
+        assert p.echo is True
         p.sendline (b'7890') # Should see this twice.
         index = p.expect ([pexpect.EOF,b'abcd',b'wxyz',b'7890'])
         assert index == 3, "index="+str(index)
@@ -270,23 +308,45 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         assert index == 3, "index="+str(index)
         p.sendeof()
 
+    def _expect_echo_off(self, p):
+        assert p.echo is False
+        p.sendline (b'alpha') # Now, should only see this once.
+        p.sendline (b'beta') # Should also be only once.
+        table = [pexpect.EOF, pexpect.TIMEOUT, b'alpha', b'beta', b'gamma']
+
+        want_index = table.index(b'alpha')
+        index = p.expect (table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
+
+
+        want_index = table.index(b'beta')
+        index = p.expect (table)
+        assert index == want_index, ('got', index, table[index],
+                                     'wanted', want_index, table[want_index],
+                                     'before', p.before,
+                                     'after', p.after,
+                                     'buffer', p.buffer)
+
     def test_expect_index (self):
         '''This tests that mixed list of regex strings, TIMEOUT, and EOF all
         return the correct index when matched.
         '''
         #pdb.set_trace()
-        p = pexpect.spawn('cat')
+        p = pexpect.spawn('cat', echo=False)
         self._expect_index(p)
 
     def test_expect_index_exact (self):
         '''Like test_expect_index(), but using expect_exact().
         '''
-        p = pexpect.spawn('cat')
+        p = pexpect.spawn('cat', echo=False)
         p.expect = p.expect_exact
         self._expect_index(p)
 
     def _expect_index (self, p):
-        p.setecho(0)
         p.sendline (b'1234')
         index = p.expect ([b'abcd',b'wxyz',b'1234',pexpect.EOF])
         assert index == 2, "index="+str(index)
@@ -497,7 +557,7 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
             SIGWINCH generated when a window is resized), but in this test, we
             are substituting an ALARM signal as this is much easier for testing
             and is treated the same as a SIGWINCH.
-            
+
             To ensure that the alarm fires during the expect call, we are
             setting the signal to alarm after 1 second while the spawned process
             sleeps for 2 seconds prior to sending the expected output.
@@ -505,7 +565,7 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         def noop(x, y):
             pass
         signal.signal(signal.SIGALRM, noop)
-    
+
         p1 = pexpect.spawn('%s sleep_for.py 2' % self.PYTHONBIN)
         p1.expect('READY', timeout=10)
         signal.alarm(1)
