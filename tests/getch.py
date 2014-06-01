@@ -18,13 +18,16 @@ PEXPECT LICENSE
     OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 '''
-import sys, tty, termios
+import sys
+import tty
+import termios
 
 if hasattr(sys.stdin, 'buffer'):
     # Python 3: we want to read raw bytes
     stdin = sys.stdin.buffer
 else:
     stdin = sys.stdin
+
 
 def main():
     print('READY')
@@ -33,7 +36,7 @@ def main():
             val = ord(stdin.read(1))
         except KeyboardInterrupt:
             val = 3
-        sys.stdout.write('%d\r\n' % (val,))
+        print(int(val))
         if val == 0:
             # StopIteration equivalent is ctrl+' ' (\x00, NUL)
             break
