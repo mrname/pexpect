@@ -641,17 +641,17 @@ class spawn(object):
         else:
             self.pid, self.child_fd = self._svr4_pty_fork()
 
-
         if self.pid == pty.CHILD:
             # Child.
-            # re-set child_fd, used by setwinsize().
+
+            # set child_fd used by setwinsize() & setecho() before execv*
             self.child_fd = pty.STDIN_FILENO
             self.setwinsize(24, 80)
 
             if not self.echo:
                 try:
                     self.setecho(self.echo)
-                except OSError:
+                except (IOError, OSError):
                     # Linux, etc. cannot set from child.
                     pass
 
