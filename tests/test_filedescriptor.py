@@ -29,36 +29,33 @@ class ExpectTestCase(PexpectTestCase.PexpectTestCase):
 
     def test_fd(self):
         fd = os.open ('TESTDATA.txt', os.O_RDONLY)
-        s = fdpexpect.fdspawn (fd)
+        s = fdpexpect.fdspawn(fd)
         s.expect(b'This is the end of test data:')
         s.expect(pexpect.EOF)
-        self.assertIn(s.before, (b' END\n',     # unix
-                                 b' END\r\n',)  # cygwin)
-                      )
+        self.assertTrue(s.before in (b' END\n',      # unix
+                                     b' END\r\n',))  # cygwin)
 
-    def test_maxread (self):
-        fd = os.open ('TESTDATA.txt', os.O_RDONLY)
-        s = fdpexpect.fdspawn (fd)
+    def test_maxread(self):
+        fd = os.open('TESTDATA.txt', os.O_RDONLY)
+        s = fdpexpect.fdspawn(fd)
         s.maxread = 100
         s.expect('2')
         s.expect('This is the end of test data:')
         s.expect(pexpect.EOF)
-        self.assertIn(s.before, (b' END\n',     # unix
-                                 b' END\r\n',)  # cygwin)
-                      )
+        self.assertTrue(s.before in (b' END\n',      # unix
+                                     b' END\r\n',))  # cygwin)
 
-    def test_fd_isalive (self):
-        fd = os.open ('TESTDATA.txt', os.O_RDONLY)
+    def test_fd_isalive(self):
+        fd = os.open('TESTDATA.txt', os.O_RDONLY)
         s = fdpexpect.fdspawn(fd)
         assert s.isalive()
         os.close(fd)
         assert not s.isalive(), "Should not be alive after close()"
 
-    def test_fd_isatty (self):
-        fd = os.open ('TESTDATA.txt', os.O_RDONLY)
-        s = fdpexpect.fdspawn (fd)
+    def test_fd_isatty(self):
+        fd = os.open('TESTDATA.txt', os.O_RDONLY)
+        s = fdpexpect.fdspawn(fd)
         assert not s.isatty()
-        #os.close(fd)
         s.close()
 
 ###    def test_close_does_not_close_fd (self):
