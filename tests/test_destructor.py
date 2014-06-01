@@ -31,10 +31,10 @@ class TestCaseDestructor(PexpectTestCase.PexpectTestCase):
             # Details of garbage collection are different on other implementations
             return 'SKIP'
         gc.collect()
-        p1 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p2 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p3 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p4 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
+        p1 = pexpect.spawn('echo hello')
+        p2 = pexpect.spawn('echo hello')
+        p3 = pexpect.spawn('echo hello')
+        p4 = pexpect.spawn('echo hello')
         fd_t1 = (p1.child_fd,p2.child_fd,p3.child_fd,p4.child_fd)
         p1.expect(pexpect.EOF)
         p2.expect(pexpect.EOF)
@@ -50,11 +50,16 @@ class TestCaseDestructor(PexpectTestCase.PexpectTestCase):
         p4 = None
         gc.collect()
 
-        p1 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p2 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p3 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p4 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        fd_t2 = (p1.child_fd,p2.child_fd,p3.child_fd,p4.child_fd)
+        p1 = pexpect.spawn('echo hello')
+        p2 = pexpect.spawn('echo hello')
+        p3 = pexpect.spawn('echo hello')
+        p4 = pexpect.spawn('echo hello')
+        fd_t2 = (p1.child_fd, p2.child_fd, p3.child_fd, p4.child_fd)
+        # read up to first byte to ensure exec() has occurred
+        p1.expect(b'h')
+        p2.expect(b'h')
+        p3.expect(b'h')
+        p4.expect(b'h')
         p1.kill(9)
         p2.kill(9)
         p3.kill(9)
@@ -65,11 +70,16 @@ class TestCaseDestructor(PexpectTestCase.PexpectTestCase):
         del (p4)
         gc.collect()
 
-        p1 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p2 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p3 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
-        p4 = pexpect.spawn('%s hello_world.py' % self.PYTHONBIN)
+        p1 = pexpect.spawn('echo hello')
+        p2 = pexpect.spawn('echo hello')
+        p3 = pexpect.spawn('echo hello')
+        p4 = pexpect.spawn('echo hello')
         fd_t3 = (p1.child_fd,p2.child_fd,p3.child_fd,p4.child_fd)
+        # read up to first byte to ensure exec() has occurred
+        p1.expect(b'h')
+        p2.expect(b'h')
+        p3.expect(b'h')
+        p4.expect(b'h')
 
         assert (fd_t1 == fd_t2 == fd_t3), "pty file descriptors not properly garbage collected (fd_t1,fd_t2,fd_t3)=(%s,%s,%s)" % (str(fd_t1),str(fd_t2),str(fd_t3))
 
