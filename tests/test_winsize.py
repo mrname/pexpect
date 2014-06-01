@@ -93,6 +93,9 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
                                             "size on this platform.")
                 else:
                     return "SKIP"
+            elif str(err).startswith("(24, 80) !="):
+                # python2.6
+                return "SKIP"
             raise
 
 if __name__ == '__main__':
