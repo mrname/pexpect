@@ -37,7 +37,10 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
             if err.args[0] == 22:
                 self.assertTrue(err.args[1].endswith(
                     ': getwinsize() may not be called on this platform'))
-                raise unittest.SkipTest("getwinsize() not supported")
+                if hasattr(unittest, 'SkipTest'):
+                    raise unittest.SkipTest("getwinsize() not supported")
+                else:
+                    return "SKIP"
             raise
 
         # verify,
@@ -59,7 +62,10 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
 
         # skip,
         if index == time_index:
-            raise unittest.SkipTest("this platform may not support sigwinch")
+            if hasattr(unittest, 'SkipTest'):
+                raise unittest.SkipTest("setwinsize() not supported")
+            else:
+                return "SKIP"
 
         # verify,
         self.assertEqual(index, want_index)
@@ -76,11 +82,18 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
     def test_set_then_getwinsize_11_22(self):
         """ Test child process accepts SIGWINCH for window size 11x22. """
         self._setwinsize(11, 22)
-        # Fascinating. Returns 80x24 on OSX
+
         try:
             self._getwinsize(11, 22)
-        except AssertionError, err:
-            raise unittest.SkipTest("getwinsize() bad on your platform: %s" % (err,))
+        except AssertionError as err:
+            # Fascinating. Returns (80, 24) on OSX
+            if str(err).startswith("Tuples differ"):
+                if hasattr(unittest, 'SkipTest'):
+                    raise unittest.SkipTest("getwinsize() cannot read child's "
+                                            "size on this platform.")
+                else:
+                    return "SKIP"
+            raise
 
 if __name__ == '__main__':
     unittest.main()

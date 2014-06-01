@@ -641,20 +641,8 @@ class spawn(object):
         else:
             self.pid, self.child_fd = self._svr4_pty_fork()
 
-        if not self.echo:
-            # disable echo on (actually, master_fd) for (some) systems, where
-            # it is required to do so only before fork() and not after.
-            try:
-                self.setecho(self.echo)
-            except:
-                pass
-        # and same for master_fd, checking linux ..
-        try:
-            self.setwinsize(24, 80)
-        except:
-            pass
 
-        if self.pid == 0:
+        if self.pid == pty.CHILD:
             # Child.
             # re-set child_fd, used by setwinsize().
             self.child_fd = pty.STDIN_FILENO
@@ -680,6 +668,8 @@ class spawn(object):
             os.execvpe(self.command, self.args, self.env)
 
         # Parent
+        self.setwinsize(24, 80)
+        self.setecho(self.echo)
         self.terminated = False
         self.closed = False
 
@@ -1417,7 +1407,7 @@ class spawn(object):
         # I can't even believe that I figured this out...
         # If waitpid() returns 0 it means that no child process
         # wishes to report, and the value of status is undefined.
-        if pid == 0:
+        if pid == pty.CHILD:
             try:
                 ### os.WNOHANG) # Solaris!
                 pid, status = os.waitpid(self.pid, waitpid_options)
@@ -1436,10 +1426,10 @@ class spawn(object):
             # Irix which seems to require a blocking call on waitpid or select,
             # so I let read_nonblocking take care of this situation
             # (unfortunately, this requires waiting through the timeout).
-            if pid == 0:
+            if pid == pty.CHILD:
                 return True
 
-        if pid == 0:
+        if pid == pty.CHILD:
             return True
 
         if os.WIFEXITED(status):
