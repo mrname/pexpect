@@ -648,6 +648,11 @@ class spawn(object):
                 self.setecho(self.echo)
             except:
                 pass
+        # and same for master_fd, checking linux ..
+        try:
+            self.setwinsize(24, 80)
+        except:
+            pass
 
         if self.pid == 0:
             # Child.
