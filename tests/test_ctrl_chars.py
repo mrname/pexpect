@@ -25,6 +25,7 @@ import unittest
 import PexpectTestCase
 import string
 import sys
+import re
 
 if sys.version_info[0] >= 3:
     def byte(i):
@@ -41,7 +42,7 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
         child = pexpect.spawn('python getch.py')
         child.expect('READY', timeout=5)
         child.sendintr()
-        child.expect('3\r\n')
+        child.expect(re.compile(r'3[\r\n]'))
 
         self._goodbye(child)
 
@@ -50,7 +51,7 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
         child = pexpect.spawn('python getch.py')
         child.expect('READY', timeout=5)
         child.sendeof()
-        child.expect('4\r\n')
+        child.expect(re.compile(r'4[\r\n]'))
 
         self._goodbye(child)
 
@@ -71,37 +72,37 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
         child.delaybeforesend = 0.05
         for ctrl in string.ascii_lowercase:
             self.assertEqual(1, child.sendcontrol(ctrl))
-            exp_val = '%s\r\n' % (ord(ctrl) - ord('a') + 1,)
-            self.sent.append(int(exp_val.rstrip()))
-            child.expect_exact(exp_val, timeout=3)
+            exp_val = ord(ctrl) - ord('a') + 1
+            child.expect(re.compile(str(exp_val) + '[\r\n]'))
+            self.sent.append(exp_val)
 
         # escape character
         self.assertEqual(1, child.sendcontrol('['))
         self.sent.append(27)
-        child.expect('27\r\n')
+        child.expect(re.compile(r'27[\r\n]'))
 
         self.assertEqual(1, child.sendcontrol('\\'))
         self.sent.append(28)
-        child.expect('28\r\n')
+        child.expect(re.compile(r'28[\r\n]'))
 
         # telnet escape character
         self.assertEqual(1, child.sendcontrol(']'))
         self.sent.append(29)
-        child.expect('29\r\n')
+        child.expect(re.compile(r'29[\r\n]'))
 
         self.assertEqual(1, child.sendcontrol('^'))
         self.sent.append(30)
-        child.expect('30\r\n')
+        child.expect(re.compile(r'30[\r\n]'))
 
         # irc protocol uses this to underline ...
         self.assertEqual(1, child.sendcontrol('_'))
         self.sent.append(31)
-        child.expect('31\r\n')
+        child.expect(re.compile(r'31[\r\n]'))
 
         # the real "backspace is delete"
         self.assertEqual(1, child.sendcontrol('?'))
         self.sent.append(127)
-        child.expect('127\r\n')
+        child.expect(re.compile(r'127[\r\n]'))
 
         self._goodbye(child)
 
@@ -109,9 +110,9 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
         ' Test all (remaining) 8-bit chracters '
         child = pexpect.spawn('python getch.py')
         child.expect('READY', timeout=5)
-        for ival in filter(lambda i: i not in self.sent, range(1, 256)):
+        for ival in set(range(1, 256)) - set(self.sent):
             child.send(byte(ival))
-            child.expect('%d\r\n' % (ival,))
+            child.expect(re.compile(str(ival) + r'[\r\n]'))
 
         self._goodbye(child)
 
@@ -119,7 +120,7 @@ class TestCtrlChars(PexpectTestCase.PexpectTestCase):
         # NUL, same as ctrl + ' '
         self.assertEqual(1, child.sendcontrol('@'))
         self.sent.append(0)
-        child.expect('0\r\n')
+        child.expect(re.compile('0' + r'[\r\n]'))
 
         # 0 is sentinel value to getch.py, assert exit
         child.expect(pexpect.EOF)
