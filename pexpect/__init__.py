@@ -652,7 +652,7 @@ class spawn(object):
                 try:
                     self.setecho(self.echo)
                 except (IOError, OSError):
-                    # Linux, etc. cannot set from child.
+                    # cannot setecho from child.
                     pass
 
             if self.ignore_sighup:
@@ -666,14 +666,20 @@ class spawn(object):
 
             os.execvpe(self.command, self.args, self.env)
 
-        # Parent
-        self.setwinsize(24, 80)
+        # Parent.
+        try:
+            self.setwinsize(24, 80)
+        except OSError:
+            # cannot setwinsize() from master, ignore
+            pass
+
         if not self.echo:
             try:
                 self.setecho(self.echo)
             except OSError:
-                # Solaris, etc. cannot set echo from master
+                # cannot setecho() from master, ignore
                 pass
+
         self.terminated = False
         self.closed = False
 
@@ -1760,7 +1766,13 @@ class spawn(object):
         TIOCSWINSZ = getattr(termios, 'TIOCSWINSZ', -2146929561)
         # Note, assume ws_xpixel and ws_ypixel are zero.
         s = struct.pack('HHHH', rows, cols, 0, 0)
-        fcntl.ioctl(self.fileno(), TIOCSWINSZ, s)
+        msg_nosupport = 'setwinsize() may not be called on this platform.'
+        try:
+            fcntl.ioctl(self.fileno(), TIOCSWINSZ, s)
+        except IOError as err:
+            if err.args == (22, 'Invalid argument'):
+                raise OSError(err.args[0], ('%s: %s' % (err.args[1], msg_nosupport)),)
+            raise
 
     def interact(self, escape_character=chr(29),
             input_filter=None, output_filter=None):
