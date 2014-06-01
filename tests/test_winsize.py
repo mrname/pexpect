@@ -64,7 +64,7 @@ class TestCaseWinsize(PexpectTestCase.PexpectTestCase):
         if index == time_index:
             raise unittest.SkipTest("this platform may not support sigwinch")
 
-        self.assertEqual(index == want_index)
+        self.assertEqual(index, want_index)
         got_rows, got_cols = map(int, child.match.group(1, 2))
         self.assertEqual((got_rows, got_cols), (want_rows, want_cols))
 

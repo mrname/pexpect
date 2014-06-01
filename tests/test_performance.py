@@ -20,17 +20,19 @@ PEXPECT LICENSE
 '''
 from __future__ import print_function
 
-import unittest, time, sys
+import unittest
+import time
+import sys
 import pexpect
 import PexpectTestCase
 
-# This isn't exactly a unit test, but it fits in nicely with the rest of the tests.
 
+# This isn't exactly a unit test, but it fits in nicely with the rest of the tests.
 class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
 
     '''Testing the performance of expect, with emphasis on wading through long
     inputs. '''
-    
+
     if sys.version_info[0] >= 3:
         @staticmethod
         def _iter_n(n):
@@ -40,10 +42,10 @@ class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
     else:
         @staticmethod
         def _iter_n(n):
-            return 'for n in range(1, %d+1): print(n)' % n    
+            return 'for n in range(1, %d+1): print(n)' % n
 
     def plain_range(self, n):
-        e = pexpect.spawn('python')
+        e = pexpect.spawn('python', timeout=60)
         self.assertEqual(e.expect(b'>>>'), 0)
         e.sendline(self._iter_n(n))
         self.assertEqual(e.expect(br'\.{3}'), 0)
@@ -51,7 +53,7 @@ class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
         self.assertEqual(e.expect([b'inquisition', '%d' % n]), 1)
 
     def window_range(self, n):
-        e = pexpect.spawn('python')
+        e = pexpect.spawn('python', timeout=60)
         self.assertEqual(e.expect(b'>>>'), 0)
         e.sendline(self._iter_n(n))
         self.assertEqual(e.expect(r'\.{3}'), 0)
@@ -59,15 +61,15 @@ class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
         self.assertEqual(e.expect([b'inquisition', '%d' % n], searchwindowsize=20), 1)
 
     def exact_range(self, n):
-        e = pexpect.spawn('python')
+        e = pexpect.spawn('python', timeout=60)
         self.assertEqual(e.expect_exact([b'>>>']), 0)
         e.sendline(self._iter_n(n))
         self.assertEqual(e.expect_exact([b'...']), 0)
         e.sendline(b'')
-        self.assertEqual(e.expect_exact([b'inquisition', '%d' % n],timeout=520), 1)
+        self.assertEqual(e.expect_exact([b'inquisition', '%d' % n], timeout=520), 1)
 
     def ewin_range(self, n):
-        e = pexpect.spawn('python')
+        e = pexpect.spawn('python', timeout=60)
         self.assertEqual(e.expect_exact([b'>>>']), 0)
         e.sendline(self._iter_n(n))
         self.assertEqual(e.expect_exact([b'...']), 0)
@@ -75,7 +77,7 @@ class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
         self.assertEqual(e.expect_exact([b'inquisition', '%d' % n], searchwindowsize=20), 1)
 
     def faster_range(self, n):
-        e = pexpect.spawn('python')
+        e = pexpect.spawn('python', timeout=60)
         self.assertEqual(e.expect(b'>>>'), 0)
         e.sendline(('list(range(1, %d+1))' % n).encode('ascii'))
         self.assertEqual(e.expect([b'inquisition', '%d' % n]), 1)
@@ -83,16 +85,16 @@ class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
     def test_100000(self):
         print()
         start_time = time.time()
-        self.plain_range (100000)
+        self.plain_range(100000)
         print("100000 calls to plain_range:", (time.time() - start_time))
         start_time = time.time()
         self.window_range(100000)
         print("100000 calls to window_range:", (time.time() - start_time))
         start_time = time.time()
-        self.exact_range (100000)
+        self.exact_range(100000)
         print("100000 calls to exact_range:", (time.time() - start_time))
         start_time = time.time()
-        self.ewin_range  (100000)
+        self.ewin_range(100000)
         print("100000 calls to ewin_range:", (time.time() - start_time))
         start_time = time.time()
         self.faster_range(100000)
@@ -101,4 +103,4 @@ class PerformanceTestCase (PexpectTestCase.PexpectTestCase):
 if __name__ == "__main__":
     unittest.main()
 
-suite = unittest.makeSuite(PerformanceTestCase,'test')
+suite = unittest.makeSuite(PerformanceTestCase, 'test')
