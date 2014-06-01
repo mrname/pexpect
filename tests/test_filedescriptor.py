@@ -24,12 +24,10 @@ import unittest
 import PexpectTestCase
 import os
 
-class ExpectTestCase(PexpectTestCase.PexpectTestCase):
-    def setUp(self):
-        print(self.id())
-        PexpectTestCase.PexpectTestCase.setUp(self)
 
-    def test_fd (self):
+class ExpectTestCase(PexpectTestCase.PexpectTestCase):
+
+    def test_fd(self):
         fd = os.open ('TESTDATA.txt', os.O_RDONLY)
         s = fdpexpect.fdspawn (fd)
         s.expect(b'This is the end of test data:')

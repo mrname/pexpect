@@ -641,6 +641,14 @@ class spawn(object):
         else:
             self.pid, self.child_fd = self._svr4_pty_fork()
 
+        if not self.echo:
+            # disable echo on (actually, master_fd) for (some) systems, where
+            # it is required to do so only before fork() and not after.
+            try:
+                self.setecho(self.echo)
+            except:
+                pass
+
         if self.pid == 0:
             # Child.
             # re-set child_fd, used by setwinsize().
@@ -650,7 +658,10 @@ class spawn(object):
             if not self.echo:
                 # disable echo on slave_fd for (some) systems *after* fork,
                 # where it is required by systems that were not handled priori
-                self.setecho(self.echo)
+                try:
+                    self.setecho(self.echo)
+                except:
+                    pass
 
             if self.ignore_sighup:
                 signal.signal(signal.SIGHUP, signal.SIG_IGN)
@@ -776,11 +787,6 @@ class spawn(object):
             # dynamically. This happens to occur on stock python 2.7.5,
             # http://bugs.python.org/issue20664
             master_fd, child_fd = pty.openpty()
-
-        if not self.echo:
-            # disable echo on slave_fd for (some) systems, where it is required
-            # to do so only before fork() and not after.
-            self.setecho(self.echo, tty_fd=child_fd)
 
         pid = os.fork()
 

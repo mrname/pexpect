@@ -23,7 +23,7 @@ from __future__ import print_function
 import pexpect
 import unittest
 import PexpectTestCase
-import time
+import string
 import sys
 
 if sys.version_info[0] >= 3:
@@ -32,91 +32,101 @@ if sys.version_info[0] >= 3:
 else:
     byte = chr
 
-class TestCtrlChars(PexpectTestCase.PexpectTestCase):
 
-    def test_control_chars(self):
-        '''This tests that we can send all 256 8-bit characters to a child
-        process.'''
+class TestCtrlChars(PexpectTestCase.PexpectTestCase):
+    sent = []
+
+    def test_sendintr(self):
+        " Test Ctrl-C. "
         child = pexpect.spawn('python getch.py')
         child.expect('READY', timeout=5)
-        try:
-            for i in range(1,256):
-                child.send(byte(i))
-                child.expect ('%d\r\n' % (i,))
-            # This needs to be last, as getch.py exits on \x00
-            child.send(byte(0))
-            child.expect('0\r\n')
-            child.expect(pexpect.EOF)
-        except Exception:
-            err = sys.exc_info()[1]
-            msg = "Did not echo character value: " + str(i) + "\n"
-            msg = msg + str(err)
-            self.fail(msg)
+        child.sendintr()
+        child.expect('3\r\n')
 
-    def test_sendintr (self):
-        try:
-            child = pexpect.spawn('python getch.py')
-            child.expect('READY', timeout=5)
-            child.sendintr()
-            child.expect ('3\r\n')
-        except Exception:
-            err = sys.exc_info()[1]
-            self.fail("Did not echo character value: 3, %s\n%s\n%s" % (
-                str(err), child.before, child.after,))
+        self._goodbye(child)
+
+    def test_sendeof(self):
+        " Test Ctrl-D. "
+        child = pexpect.spawn('python getch.py')
+        child.expect('READY', timeout=5)
+        child.sendeof()
+        child.expect('4\r\n')
+
+        self._goodbye(child)
 
     def test_bad_sendcontrol_chars (self):
         '''This tests that sendcontrol will return 0 for an unknown char. '''
-
-        child = pexpect.spawn('python getch.py')
-        retval = child.sendcontrol('1')
-        assert retval == 0, "sendcontrol() should have returned 0 because there is no such thing as ctrl-1."
+        child = pexpect.spawn('cat')
+        # there is no such thing as ctrl-1.
+        self.assertEqual(0, child.sendcontrol('1'))
 
     def test_sendcontrol(self):
         '''This tests that we can send all special control codes by name.
         '''
         child = pexpect.spawn('python getch.py')
+
         # On slow machines, like Travis, the process is not ready in time to
         # catch the first character unless we wait for it.
         child.expect('READY', timeout=5)
         child.delaybeforesend = 0.05
-        for ctrl in 'abcdefghijklmnopqrstuvwxyz':
-            assert child.sendcontrol(ctrl) == 1
-            val = ord(ctrl) - ord('a') + 1
-            try:
-                child.expect_exact(str(val)+'\r\n', timeout=2)
-            except:
-                print(ctrl)
-                raise
+        for ctrl in string.ascii_lowercase:
+            self.assertEqual(1, child.sendcontrol(ctrl))
+            exp_val = '%s\r\n' % (ord(ctrl) - ord('a') + 1,)
+            self.sent.append(int(exp_val.rstrip()))
+            child.expect_exact(exp_val, timeout=3)
 
         # escape character
-        assert child.sendcontrol('[') == 1
-        child.expect ('27\r\n')
-        assert child.sendcontrol('\\') == 1
-        child.expect ('28\r\n')
+        self.assertEqual(1, child.sendcontrol('['))
+        self.sent.append(27)
+        child.expect('27\r\n')
+
+        self.assertEqual(1, child.sendcontrol('\\'))
+        self.sent.append(28)
+        child.expect('28\r\n')
+
         # telnet escape character
-        assert child.sendcontrol(']') == 1
-        child.expect ('29\r\n')
-        assert child.sendcontrol('^') == 1
-        child.expect ('30\r\n')
+        self.assertEqual(1, child.sendcontrol(']'))
+        self.sent.append(29)
+        child.expect('29\r\n')
+
+        self.assertEqual(1, child.sendcontrol('^'))
+        self.sent.append(30)
+        child.expect('30\r\n')
+
         # irc protocol uses this to underline ...
-        assert child.sendcontrol('_') == 1
-        child.expect ('31\r\n')
+        self.assertEqual(1, child.sendcontrol('_'))
+        self.sent.append(31)
+        child.expect('31\r\n')
+
         # the real "backspace is delete"
-        assert child.sendcontrol('?') == 1
-        child.expect ('127\r\n')
+        self.assertEqual(1, child.sendcontrol('?'))
+        self.sent.append(127)
+        child.expect('127\r\n')
+
+        self._goodbye(child)
+
+    def test_control_chars(self):
+        ' Test all (remaining) 8-bit chracters '
+        child = pexpect.spawn('python getch.py')
+        child.expect('READY', timeout=5)
+        for ival in filter(lambda i: i not in self.sent, range(1, 256)):
+            child.send(byte(ival))
+            child.expect('%d\r\n' % (ival,))
+
+        self._goodbye(child)
+
+    def _goodbye(self, child):
         # NUL, same as ctrl + ' '
-        assert child.sendcontrol('@') == 1
-        child.expect ('0\r\n')
-        # 0 is sentinel value to getch.py, assert exit:
-        #   causes child to exit, but, if immediately tested,
-        #   isalive() still returns True unless an artifical timer
-        #   is used.
-        time.sleep(0.5)
-        assert child.isalive() == False, child.isalive()
-        assert child.exitstatus == 0
+        self.assertEqual(1, child.sendcontrol('@'))
+        self.sent.append(0)
+        child.expect('0\r\n')
+
+        # 0 is sentinel value to getch.py, assert exit
+        child.expect(pexpect.EOF)
+        self.assertEqual(False, child.isalive())
+        self.assertEqual(0, child.exitstatus)
 
 if __name__ == '__main__':
     unittest.main()
 
-suite = unittest.makeSuite(TestCtrlChars,'test')
-
+suite = unittest.makeSuite(TestCtrlChars, 'test')
