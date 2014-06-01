@@ -142,60 +142,66 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         #        ^
         want_index = table.index(ONE)
         index = p.expect(table)
-        assert index == want_index, ('got', index, table[index],
-                                     'wanted', want_index, table[want_index],
-                                     'before', p.before,
-                                     'after', p.after,
-                                     'buffer', p.buffer)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         table = [JUNK, pexpect.TIMEOUT, ONE, TWO, THREE, pexpect.EOF, ]
         #                                    ^
         want_index = table.index(TWO)
         index = p.expect(table)
-        assert index == want_index, ('got', index, table[index],
-                                     'wanted', want_index, table[want_index],
-                                     'before', p.before,
-                                     'after', p.after,
-                                     'buffer', p.buffer)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         table = [JUNK, pexpect.TIMEOUT, ONE, TWO, THREE, pexpect.EOF, ]
         #                                         ^
         want_index = table.index(THREE)
         index = p.expect(table)
-        assert index == want_index, ('got', index, table[index],
-                                     'wanted', want_index, table[want_index],
-                                     'before', p.before,
-                                     'after', p.after,
-                                     'buffer', p.buffer)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         table = [pexpect.EOF, TWO, THREE, FOUR, ]
         #                                 ^
         want_index = table.index(FOUR)
         index = p.expect(table)
-        assert index == want_index, ('got', index, table[index],
-                                     'wanted', want_index, table[want_index],
-                                     'before', p.before,
-                                     'after', p.after,
-                                     'buffer', p.buffer)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         table = [TWO, THREE, FOUR, pexpect.EOF]
         #                          ^
         want_index = table.index(pexpect.EOF)
         index = p.expect(table)
-        assert index == want_index, ('got', index, table[index],
-                                     'wanted', want_index, table[want_index],
-                                     'before', p.before,
-                                     'after', p.after,
-                                     'buffer', p.buffer)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         # it is possible to re-expect EOF multiple times
         want_index = table.index(pexpect.EOF)
         index = p.expect(table)
-        assert index == want_index, ('got', index, table[index],
-                                     'wanted', want_index, table[want_index],
-                                     'before', p.before,
-                                     'after', p.after,
-                                     'buffer', p.buffer)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
     def test_waitnoecho(self):
 
@@ -329,38 +335,68 @@ class ExpectTestCase (PexpectTestCase.PexpectTestCase):
         p = pexpect.spawn('cat', echo=False)
         self._expect_index(p)
 
-    def test_expect_index_exact (self):
+    def test_expect_index_exact(self):
         '''Like test_expect_index(), but using expect_exact().
         '''
         p = pexpect.spawn('cat', echo=False)
         p.expect = p.expect_exact
         self._expect_index(p)
 
-    def _expect_index (self, p):
+    def _expect_index(self, p):
         p.sendline(b'ONE')
         table = [b'junk', b'JUNK', b'ONE', pexpect.EOF]
         want_index = table.index(b'ONE')
-        self.assertEqual(p.expect(table), want_index)
+        index = p.expect(table)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         p.sendline(b'TWO')
         table = [pexpect.TIMEOUT, b'TWO', b'three', b'four', pexpect.EOF]
         want_index = table.index(b'TWO')
-        self.assertEqual(p.expect(table), want_index)
+        index = p.expect(table)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         p.sendline(b'THREE')
         table = [b'junk', pexpect.TIMEOUT, b'THREE', b'ONE', pexpect.EOF]
         want_index = table.index(b'THREE')
-        self.assertEqual(p.expect(table), want_index)
+        index = p.expect(table)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         p.sendline(b'going down ...')
         table = [b'junk', b'JUNK', b'ONE', pexpect.EOF, pexpect.TIMEOUT]
         want_index = table.index(pexpect.TIMEOUT)
-        self.assertEqual(p.expect(table, timeout=3), want_index)
+        index = p.expect(table)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
         p.sendeof()
         table = [b'junk', b'JUNK', b'ONE', pexpect.TIMEOUT, pexpect.EOF]
         want_index = table.index(pexpect.EOF)
-        self.assertEqual(p.expect(table), want_index)
+        index = p.expect(table)
+        self.assertEqual(index, want_index,
+                         ('got', index, table[index],
+                          'wanted', want_index, table[want_index],
+                          'before', p.before,
+                          'after', p.after,
+                          'buffer', p.buffer))
 
     def test_expect_text_to_subprocess(self):
         the_old_way = subprocess.Popen(args=['ls', '-1Sai', '/bin'],

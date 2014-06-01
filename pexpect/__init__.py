@@ -649,11 +649,10 @@ class spawn(object):
             self.setwinsize(24, 80)
 
             if not self.echo:
-                # disable echo on slave_fd for (some) systems *after* fork,
-                # where it is required by systems that were not handled priori
                 try:
                     self.setecho(self.echo)
-                except:
+                except OSError:
+                    # Linux, etc. cannot set from child.
                     pass
 
             if self.ignore_sighup:
@@ -669,11 +668,12 @@ class spawn(object):
 
         # Parent
         self.setwinsize(24, 80)
-        try:
-            self.setecho(self.echo)
-        except OSError:
-            # Solaris, etc. cannot set echo from master
-            pass
+        if not self.echo:
+            try:
+                self.setecho(self.echo)
+            except OSError:
+                # Solaris, etc. cannot set echo from master
+                pass
         self.terminated = False
         self.closed = False
 
@@ -683,9 +683,10 @@ class spawn(object):
 
         Open a pseudo-terminal, returning open fd's for both master and slave.
 
-        This is an alternative to the built-in os.openpty() and libc openpty(3),
-        which does not exist, or work at all, on systems implementing UNIX SVR4
-        (streams), such as Solaris 8+, Linux, OSF/1, HP-UX, AIX.
+        This is an alternative to the built-in os.openpty() and libc
+        openpty(3), which does not exist, or work at all, on systems
+        implementing UNIX SVR4 (streams), such as Solaris 8+, Linux, OSF/1,
+        HP-UX, AIX.
 
         These systems do not open each of ``/dev/pty[p-zP-T][0-9a-f]``, seeking
         the first sucessfully opened file descriptor (BSD), but, instead open a
