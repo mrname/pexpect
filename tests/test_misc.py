@@ -353,10 +353,14 @@ class TestCaseMisc(PexpectTestCase.PexpectTestCase):
         else:
             assert False, "Should have raised an exception."
 
-    def test_multiprocessing(self):
-        " ensure multiprocessing may be used with pexpect. "
+    def test_multiprocessing_closed_stdin(self):
+        " multiprocessing may be used with pexpect when stdin is closed. "
+        # in older versions of multiprocessing, stdin was closed;
+        # closing an already-closed fd is a non-op; we emulate this
+        # older version of multiprocessing by closing stdin.
         def target(queue):
             def _work():
+                sys.__stdin__.close()
                 child = pexpect.spawn('cat', echo=False)
                 child.sendline('\n'.join(['alpha', 'beta']))
                 alpha, beta = child.readline(), child.readline()
@@ -379,7 +383,40 @@ class TestCaseMisc(PexpectTestCase.PexpectTestCase):
         proc = multiprocessing.Process(target=target, args=[o_queue,])
         proc.start()
         proc.join()
-        assert o_queue.get() == (b'alpha', b'beta')
+        return_value = o_queue.get()
+        assert return_value == (b'alpha', b'beta'), return_value
+
+    def test_multiprocessing_closed_stdout(self):
+        " multiprocessing may be used with pexpect when stdout closed. "
+        # similar to above test, but just ensure ValueError is caught
+        # when stdout is closed in __init__.
+        def target(queue):
+            def _work():
+                sys.__stdout__.close()
+                child = pexpect.spawn('cat', echo=False)
+                child.sendline('\n'.join(['alpha', 'beta']))
+                alpha, beta = child.readline(), child.readline()
+                child.sendeof()
+                child.expect(pexpect.EOF)
+                assert alpha.rstrip() == b'alpha'
+                assert beta.rstrip() == b'beta'
+                assert not child.isalive(), ('child is alive', child.isalive())
+                assert child.exitstatus == 0, ('exit status', child.exitstatus)
+                # return output of sub-process
+                return (alpha.rstrip(), beta.rstrip(),)
+            try:
+                val = _work()
+            except Exception:
+                queue.put(''.join(format_exception(*sys.exc_info())))
+            else:
+                queue.put(val)
+
+        o_queue = multiprocessing.Queue()
+        proc = multiprocessing.Process(target=target, args=[o_queue,])
+        proc.start()
+        proc.join()
+        return_value = o_queue.get()
+        assert return_value == (b'alpha', b'beta'), return_value
 
 if __name__ == '__main__':
     unittest.main()
