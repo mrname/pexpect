@@ -25,6 +25,8 @@ import signal
 import time
 import tempfile
 import os
+import multiprocessing
+from traceback import format_exception
 
 import pexpect
 from . import PexpectTestCase
@@ -350,6 +352,34 @@ class TestCaseMisc(PexpectTestCase.PexpectTestCase):
             assert 'pexpect/__init__.py' not in tb
         else:
             assert False, "Should have raised an exception."
+
+    def test_multiprocessing(self):
+        " ensure multiprocessing may be used with pexpect. "
+        def target(queue):
+            def _work():
+                child = pexpect.spawn('cat', echo=False)
+                child.sendline('\n'.join(['alpha', 'beta']))
+                alpha, beta = child.readline(), child.readline()
+                child.sendeof()
+                child.expect(pexpect.EOF)
+                assert alpha.rstrip() == b'alpha'
+                assert beta.rstrip() == b'beta'
+                assert not child.isalive(), ('child is alive', child.isalive())
+                assert child.exitstatus == 0, ('exit status', child.exitstatus)
+                # return output of sub-process
+                return (alpha.rstrip(), beta.rstrip(),)
+            try:
+                val = _work()
+            except Exception:
+                queue.put(''.join(format_exception(*sys.exc_info())))
+            else:
+                queue.put(val)
+
+        o_queue = multiprocessing.Queue()
+        proc = multiprocessing.Process(target=target, args=[o_queue,])
+        proc.start()
+        proc.join()
+        assert o_queue.get() == (b'alpha', b'beta')
 
 if __name__ == '__main__':
     unittest.main()
