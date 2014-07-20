@@ -352,7 +352,7 @@ class TestCaseMisc(PexpectTestCase.PexpectTestCase):
             assert False, "Should have raised an exception."
 
 
-if os.environ.get('TRAVIS', None) is not None:
+if os.environ.get('TRAVIS', None) != 'true':
     # Travis-CI demonstrates unexpected behavior.
 
     class TestCaseCanon(PexpectTestCase.PexpectTestCase):
@@ -412,7 +412,7 @@ if os.environ.get('TRAVIS', None) is not None:
             child.expect_exact('_' * send_bytes)
 
             # BEL is not found,
-            with self.assertRaises(pexpect.TIMEOUT, timeout=1):
+            with self.assertRaises(pexpect.TIMEOUT):
                 child.expect_exact('\a')
 
             # cleanup,
@@ -436,7 +436,7 @@ if os.environ.get('TRAVIS', None) is not None:
             child.expect_exact('\a')
 
             # verify, no more additional BELs expected
-            with self.assertRaises(pexpect.TIMEOUT, timeout=1):
+            with self.assertRaises(pexpect.TIMEOUT):
                 child.expect_exact('\a')
 
             # exercise, we must now backspace to send CR.
