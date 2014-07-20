@@ -427,12 +427,18 @@ if os.environ.get('TRAVIS', None) != 'true':
             # given,
             child = pexpect.spawn('bash', echo=False, timeout=2)
             child.sendline('stty icanon imaxbel erase ^H')
-            child.sendline('cat')
+            child.sendline('echo BEGIN; cat')
             send_bytes = self.max_input
 
             # exercise,
             child.send('_' * send_bytes)
             child.sendline()  # rings BEL
+
+            # fast forward beyond 'cat' command, as ^G can be found as part of
+            # set-xterm-title sequence of $PROMPT_COMMAND or $PS1.
+            child.expect_exact('BEGIN')
+
+            # verify, BEL is rung
             child.expect_exact('\a')
 
             # verify, no more additional BELs expected
@@ -458,16 +464,21 @@ if os.environ.get('TRAVIS', None) != 'true':
             # given,
             child = pexpect.spawn('bash', echo=False, timeout=5)
             child.sendline('stty -icanon imaxbel')
-            child.sendline('cat')
+            child.sendline('echo BEGIN; cat')
             send_bytes = self.max_input + 11
 
             # exercise,
             child.send('_' * send_bytes)
             child.sendline()
 
+            # fast forward beyond 'cat' command, as ^G can be found as part of
+            # set-xterm-title sequence of $PROMPT_COMMAND or $PS1.
+            child.expect_exact('BEGIN')
+
             # BEL is *not* found,
             with self.assertRaises(pexpect.TIMEOUT):
                 child.expect_exact('\a', timeout=1)
+                print(child.buffer)
 
             # verify cat(1) also received all input,
             child.expect_exact('_' * send_bytes)
